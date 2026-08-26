@@ -72,17 +72,16 @@ def generate_cut_list(build_id: str) -> dict:
     if "error" in result:
         return result
     b = result["build"]
-    cuts = b["cut_list"]
+    materials = b["materials"]
     by_material: dict = {}
-    for cut in cuts:
-        mat = cut["material"]
-        by_material.setdefault(mat, []).append(cut)
+    for mat in materials:
+        by_material.setdefault(mat["name"], []).append(mat)
     return {
         "build_id": build_id,
         "build_name": b["name"],
-        "cut_list": cuts,
+        "cut_list": materials,
         "by_material": by_material,
-        "total_pieces": sum(c["qty"] for c in cuts),
+        "total_pieces": sum(m["qty"] for m in materials),
     }
 
 

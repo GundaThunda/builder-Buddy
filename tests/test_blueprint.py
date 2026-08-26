@@ -23,7 +23,7 @@ def client():
 
 
 def make_build(**kwargs):
-    return bb.add_build(name=kwargs.get("name", "Test Build"), **{k: v for k, v in kwargs.items() if k != "name"})
+    return bb.add_build(name=kwargs.pop("name", "Test Build"), **kwargs)
 
 
 # --- add_build ---
@@ -33,7 +33,7 @@ def test_add_build_basic():
     assert "build" in result
     assert result["build"]["status"] == "draft"
     assert result["build"]["steps"] == []
-    assert result["build"]["cut_list"] == []
+    assert result["build"]["materials"] == []
 
 
 def test_add_build_empty_name():
@@ -61,6 +61,51 @@ def test_add_build_with_tags():
     assert "beginner" in result["build"]["tags"]
 
 
+def test_add_build_project_type():
+    result = make_build(name="Chair", project_type="furniture")
+    assert result["build"]["project_type"] == "furniture"
+
+
+def test_add_build_invalid_project_type_defaults():
+    result = make_build(name="Thing", project_type="spaceship")
+    assert result["build"]["project_type"] == "custom"
+
+
+def test_add_build_skill_level():
+    result = make_build(name="Box", skill_level="advanced")
+    assert result["build"]["skill_level"] == "advanced"
+
+
+def test_add_build_difficulty_valid():
+    result = make_build(name="Box", difficulty=3)
+    assert result["build"]["difficulty"] == 3
+
+
+def test_add_build_difficulty_invalid():
+    result = bb.add_build(name="Box", difficulty=6)
+    assert "error" in result
+
+
+def test_add_build_phase():
+    result = make_build(name="Stool", phase="sourcing")
+    assert result["build"]["phase"] == "sourcing"
+
+
+def test_add_build_notes():
+    result = make_build(name="Bench", notes="First real shop build")
+    assert result["build"]["notes"] == "First real shop build"
+
+
+def test_add_build_estimated_cost():
+    result = make_build(name="Table", estimated_cost_usd=150.0)
+    assert result["build"]["estimated_cost_usd"] == 150.0
+
+
+def test_add_build_actual_cost_starts_zero():
+    result = make_build(name="Shelf")
+    assert result["build"]["actual_cost_usd"] == 0.0
+
+
 # --- get_build ---
 
 def test_get_build():
@@ -86,6 +131,12 @@ def test_update_build_description():
     b = make_build()["build"]
     result = bb.update_build(b["id"], description="A sturdy bench")
     assert result["build"]["description"] == "A sturdy bench"
+
+
+def test_update_build_notes():
+    b = make_build()["build"]
+    result = bb.update_build(b["id"], notes="Check grain direction")
+    assert result["build"]["notes"] == "Check grain direction"
 
 
 def test_update_build_empty_name_rejected():
@@ -163,7 +214,7 @@ def test_delete_build_not_found():
     assert result["error"] == "not_found"
 
 
-# --- list/search builds ---
+# --- list / search builds ---
 
 def test_list_builds():
     make_build(name="A")
@@ -184,6 +235,14 @@ def test_list_filter_by_tag():
     make_build(name="Tagged", tags=["pine"])
     make_build(name="Untagged")
     result = bb.list_builds(tag="pine")
+    assert result["count"] == 1
+
+
+def test_list_filter_by_phase():
+    b = make_build(name="In Progress")["build"]
+    bb.update_build(b["id"], phase="in_progress")
+    make_build(name="Planning")
+    result = bb.list_builds(phase="in_progress")
     assert result["count"] == 1
 
 
@@ -210,6 +269,24 @@ def test_add_step():
     assert result["step"]["completed"] is False
 
 
+def test_add_step_with_process_type():
+    b = make_build()["build"]
+    result = bb.add_step(b["id"], title="Rip to width", process_type="ripping")
+    assert result["step"]["process_type"] == "ripping"
+
+
+def test_add_step_with_estimated_minutes():
+    b = make_build()["build"]
+    result = bb.add_step(b["id"], title="Sand", estimated_minutes=30)
+    assert result["step"]["estimated_minutes"] == 30
+
+
+def test_add_step_with_alternatives():
+    b = make_build()["build"]
+    result = bb.add_step(b["id"], title="Join", alternatives="Use pocket screws instead of dowels")
+    assert "pocket screws" in result["step"]["alternatives"]
+
+
 def test_add_step_empty_title():
     b = make_build()["build"]
     result = bb.add_step(b["id"], title="")
@@ -222,6 +299,27 @@ def test_steps_auto_order():
     bb.add_step(b["id"], title="Step 2")
     build = bb.get_build(b["id"])["build"]
     assert build["steps"][1]["order"] == 2
+
+
+def test_update_step_title():
+    b = make_build()["build"]
+    step = bb.add_step(b["id"], title="Rough cut")["step"]
+    result = bb.update_step(b["id"], step["id"], title="Precise cut")
+    assert result["step"]["title"] == "Precise cut"
+
+
+def test_update_step_notes():
+    b = make_build()["build"]
+    step = bb.add_step(b["id"], title="Sand")["step"]
+    result = bb.update_step(b["id"], step["id"], notes="Start 80 grit, finish 220")
+    assert "80 grit" in result["step"]["notes"]
+
+
+def test_update_step_empty_title_rejected():
+    b = make_build()["build"]
+    step = bb.add_step(b["id"], title="Sand")["step"]
+    result = bb.update_step(b["id"], step["id"], title="")
+    assert "error" in result
 
 
 def test_complete_step():
@@ -280,51 +378,112 @@ def test_locked_build_blocks_step_add():
     assert result["error"] == "locked"
 
 
-# --- cut list ---
+# --- materials ---
 
-def test_add_cut():
+def test_add_material():
     b = make_build()["build"]
-    result = bb.add_cut(b["id"], material="Red Oak", qty=2, length=48.0, width=6.0, thickness=0.75)
-    assert result["cut"]["material"] == "Red Oak"
-    assert result["cut"]["qty"] == 2
+    result = bb.add_material(b["id"], name="White Oak", qty=2.0, unit="bf")
+    assert result["material"]["name"] == "White Oak"
+    assert result["material"]["qty"] == 2.0
 
 
-def test_add_cut_invalid_unit():
+def test_add_material_invalid_unit():
     b = make_build()["build"]
-    result = bb.add_cut(b["id"], material="Pine", unit="yards")
+    result = bb.add_material(b["id"], name="Pine", unit="yards")
     assert "error" in result
 
 
-def test_add_cut_invalid_qty():
+def test_add_material_invalid_qty():
     b = make_build()["build"]
-    result = bb.add_cut(b["id"], material="Pine", qty=0)
+    result = bb.add_material(b["id"], name="Pine", qty=0)
     assert "error" in result
 
 
-def test_add_cut_empty_material():
+def test_add_material_empty_name():
     b = make_build()["build"]
-    result = bb.add_cut(b["id"], material="")
+    result = bb.add_material(b["id"], name="")
     assert "error" in result
 
 
-def test_delete_cut():
+def test_add_material_cost_computed():
     b = make_build()["build"]
-    cut = bb.add_cut(b["id"], material="Walnut")["cut"]
-    result = bb.delete_cut(b["id"], cut["id"])
-    assert "deleted_cut_id" in result
+    result = bb.add_material(b["id"], name="Walnut", qty=3.0, unit="bf", cost_per_unit=12.0)
+    assert result["material"]["total_cost"] == 36.0
 
 
-def test_locked_build_blocks_cut_add():
+def test_add_material_updates_actual_cost():
+    b = make_build()["build"]
+    bb.add_material(b["id"], name="Oak", qty=2.0, unit="bf", cost_per_unit=10.0)
+    bb.add_material(b["id"], name="Glue", qty=1.0, unit="oz", cost_per_unit=5.0)
+    build = bb.get_build(b["id"])["build"]
+    assert build["actual_cost_usd"] == 25.0
+
+
+def test_add_material_with_vendor():
+    b = make_build()["build"]
+    result = bb.add_material(b["id"], name="Pine", qty=1.0, unit="bf", vendor="Woodcraft")
+    assert result["material"]["vendor"] == "Woodcraft"
+
+
+def test_add_material_with_dimensions():
+    b = make_build()["build"]
+    dims = {"length": 96.0, "width": 6.0, "thickness": 0.75, "unit": "in"}
+    result = bb.add_material(b["id"], name="Pine", qty=4.0, unit="pc", dimensions=dims)
+    assert result["material"]["dimensions"]["length"] == 96.0
+
+
+def test_add_material_sourced_flag():
+    b = make_build()["build"]
+    result = bb.add_material(b["id"], name="Sandpaper", qty=10.0, unit="pc", sourced=True)
+    assert result["material"]["sourced"] is True
+
+
+def test_update_material_qty():
+    b = make_build()["build"]
+    mat = bb.add_material(b["id"], name="Oak", qty=2.0, unit="bf", cost_per_unit=10.0)["material"]
+    result = bb.update_material(b["id"], mat["id"], qty=4.0)
+    assert result["material"]["qty"] == 4.0
+    assert result["material"]["total_cost"] == 40.0
+
+
+def test_update_material_cost_recomputed():
+    b = make_build()["build"]
+    mat = bb.add_material(b["id"], name="Pine", qty=5.0, unit="bf", cost_per_unit=4.0)["material"]
+    bb.update_material(b["id"], mat["id"], cost_per_unit=6.0)
+    build = bb.get_build(b["id"])["build"]
+    assert build["actual_cost_usd"] == 30.0
+
+
+def test_mark_material_sourced():
+    b = make_build()["build"]
+    mat = bb.add_material(b["id"], name="Oak", qty=1.0, unit="bf")["material"]
+    result = bb.mark_material_sourced(b["id"], mat["id"], sourced=True)
+    assert result["material"]["sourced"] is True
+
+
+def test_delete_material():
+    b = make_build()["build"]
+    mat = bb.add_material(b["id"], name="Walnut", qty=1.0, unit="bf")["material"]
+    result = bb.delete_material(b["id"], mat["id"])
+    assert "deleted_material_id" in result
+    build = bb.get_build(b["id"])["build"]
+    assert len(build["materials"]) == 0
+
+
+def test_delete_material_updates_actual_cost():
+    b = make_build()["build"]
+    m1 = bb.add_material(b["id"], name="Oak", qty=2.0, unit="bf", cost_per_unit=10.0)["material"]
+    bb.add_material(b["id"], name="Glue", qty=1.0, unit="oz", cost_per_unit=5.0)
+    bb.delete_material(b["id"], m1["id"])
+    build = bb.get_build(b["id"])["build"]
+    assert build["actual_cost_usd"] == 5.0
+
+
+def test_locked_build_blocks_material_add():
     b = make_build()["build"]
     bb.set_build_status(b["id"], "finalized")
-    result = bb.add_cut(b["id"], material="Maple")
+    result = bb.add_material(b["id"], name="Maple", qty=1.0, unit="bf")
     assert result["error"] == "locked"
-
-
-def test_cut_mm_unit():
-    b = make_build()["build"]
-    result = bb.add_cut(b["id"], material="MDF", unit="mm", length=1200.0)
-    assert result["cut"]["unit"] == "mm"
 
 
 # --- required tools ---
@@ -402,12 +561,13 @@ def test_http_add_step(client):
     assert r2.status_code == 201
 
 
-def test_http_add_cut(client):
+def test_http_add_material(client):
     r = client.post("/blueprint/builds", json={"name": "Table"})
     bid = r.get_json()["build"]["id"]
-    r2 = client.post(f"/blueprint/builds/{bid}/cuts",
-                     json={"material": "Maple", "qty": 4, "length": 30.0, "unit": "in"})
+    r2 = client.post(f"/blueprint/builds/{bid}/materials",
+                     json={"name": "Maple", "qty": 4.0, "unit": "bf", "cost_per_unit": 8.0})
     assert r2.status_code == 201
+    assert r2.get_json()["material"]["total_cost"] == 32.0
 
 
 def test_http_delete_build(client):

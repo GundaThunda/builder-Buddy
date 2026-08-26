@@ -33,9 +33,12 @@ def build():
     bb.add_step(b["id"], title="Mill lumber")
     s2 = bb.add_step(b["id"], title="Cut to length")["step"]
     bb.complete_step(b["id"], s2["id"], completed=True)
-    bb.add_cut(b["id"], material="Pine", qty=4, length=36.0, width=4.0, thickness=0.75, unit="in")
-    bb.add_cut(b["id"], material="Pine", qty=2, length=24.0, width=6.0, thickness=0.75, unit="in")
-    bb.add_cut(b["id"], material="Oak", qty=1, length=18.0, width=4.0, thickness=1.5, unit="in")
+    bb.add_material(b["id"], name="Pine", qty=4.0, unit="pc",
+                    dimensions={"length": 36.0, "width": 4.0, "thickness": 0.75, "unit": "in"})
+    bb.add_material(b["id"], name="Pine", qty=2.0, unit="pc",
+                    dimensions={"length": 24.0, "width": 6.0, "thickness": 0.75, "unit": "in"})
+    bb.add_material(b["id"], name="Oak", qty=1.0, unit="pc",
+                    dimensions={"length": 18.0, "width": 4.0, "thickness": 1.5, "unit": "in"})
     bb.link_tool(b["id"], "tool-table-saw")
     bb.link_tool(b["id"], "tool-drill")
     return b
@@ -87,7 +90,7 @@ def test_step_list_not_found():
     assert "error" in result
 
 
-# --- generate_cut_list ---
+# --- generate_cut_list (now reads materials) ---
 
 def test_cut_list_contains_all(build):
     result = sil.generate_cut_list(build["id"])
