@@ -8,23 +8,30 @@ Builder Buddy is a modular woodworking and shop management platform built by Nic
 
 Python/WSGI backend — do not assume FastAPI unless explicitly told otherwise. Match WSGI patterns from existing codebase.
 
+**Module independence:** Toolbox, Blueprint, and Social Structure are independent modules — each adds to the platform on its own. Toolbox connects to the user's external tool app (connected app integration). Silhouette is the only shared layer: it bridges modules by providing a unified presentation surface. Nothing outside Silhouette should depend on another module directly.
+
 ## Modules
 
 | Module | Purpose | Active File(s) |
 |---|---|---|
-| Blueprint | Build planning | `builder-buddy-site.jsx`, `website_builder_buddy.py` |
-| Toolbox | Inventory management | `website_toolbox.py` |
-| Silhouette | Presentation layer / Blueprint sidecar | `website_silhouette.py` |
-| Social Structure | Points, leaderboard, marketplace | In development |
+| Blueprint | Build planning | `website_builder_buddy.py` |
+| Toolbox | Inventory management — links to external tool app | `website_toolbox.py` |
+| Silhouette | Shared presentation bridge (overview, steps, materials, snapshots) | `website_silhouette.py` |
+| Social Structure | Points, leaderboard, marketplace | `website_social_structure.py` |
+| Tips | Verified Tips knowledge base (CRUD, search, categories) | `website_tips.py` |
+| Ron G | AI Q&A via Claude API — build-context-aware, Ron G brand voice | `website_ron_g.py` |
 
-**Test baseline:** 118+ passing (Toolbox 54, Blueprint 42, Silhouette 22, baseline 4)
+**Test baseline:** 262 passing (Toolbox 54, Blueprint 52, Silhouette 32, Social 37, Tips 34, Ron G 19, Baseline 4)
 
 ## Purgatory — Active Bugs
 
-Resolve in dependency order. Do not mark resolved without explicit confirmation.
+F1 and F2 were avoided in the fresh build — `datetime.now(timezone.utc)` is used throughout, and no `user_id` param collisions exist. Purgatory is clear. Mark new bugs here if they arise.
 
-- **F1** — `datetime.utcnow()` deprecated throughout. Replace with `datetime.now(timezone.utc)`. Fix F1 before F2 where they touch the same files.
-- **F2** — `user_id` keyword argument collision crash in `update_build()` and `update_tool()`. Needs param rename or signature fix.
+## Ron G — Mascot / AI Character
+
+Ron G is a consistent brand character — same voice, same identity across all users. Personalization comes from **context injection** (current build, skill level, past session log), not from mutating the character itself. This keeps the voice coherent and the brand memorable while still feeling like Ron G knows you and your project.
+
+If per-user profile personalization is added later (name, preferences, build history), inject it as context — same mechanism, more data.
 
 ## Tool / Workshop OS Rules
 
@@ -55,3 +62,7 @@ Stoic, calm, direct, dry humor, safety-first, no condescension toward beginners.
 - Builder Buddy core is untouchable without explicit instruction + full confirmation
 - Destructive ops (migrations, schema changes) require double confirmation
 - Don't invent standards, dimensions, tool capabilities, or API behavior — verify or ask
+
+## Context Compaction Rule
+
+When conversations are compacted, **consolidate context — do not lose it**. Every architectural decision, active bug, module state, test count, and working rule must survive compaction. The summary must be dense enough that the next session can pick up without re-deriving anything already settled.
