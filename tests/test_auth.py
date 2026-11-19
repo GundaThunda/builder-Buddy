@@ -291,13 +291,12 @@ def test_social_reads_stay_public(client):
     assert client.get("/social/listings").status_code == 200
 
 
-def test_member_can_award_points_to_self(client):
+def test_member_cannot_award_points_even_to_self(client):
     _member(HANDLE)
     token = _token(client)
     resp = client.post(f"/social/users/{HANDLE}/points", headers=_bearer(token),
                        json={"event": "build_completed"})
-    assert resp.status_code == 200
-    assert resp.get_json()["total_points"] == 50
+    assert resp.status_code == 403
 
 
 def test_member_cannot_award_points_to_someone_else(client):

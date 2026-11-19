@@ -1,8 +1,9 @@
 import uuid
 import json
 import os
+import time
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, g, request, jsonify
 
 from website_gate import require_auth
 
@@ -281,7 +282,7 @@ def route_create_user(user_handle):
 
 
 @social_routes.route("/users/<user_handle>/points", methods=["POST"])
-@require_auth(owner_of=_owner_from_route_user)
+@require_auth(admin_only=True)
 def route_award_points(user_handle):
     body = request.get_json(silent=True) or {}
     result = award_points(user_handle, body.get("event", ""), body.get("ref_id", ""))
@@ -348,3 +349,192 @@ def route_withdraw_listing(listing_id):
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)
+
+
+# --- Ratings: separate metric from points. Members rate others' published builds. ---
+# Points remain admin/system-awarded only.
+
+RATING_SCORES = {1, 2, 3, 4, 5}
+RAPID_WINDOW_SECONDS = 60
+RAPID_THRESHOLD = 5
+NEW_ACCOUNT_SECONDS = 24 * 60 * 60
+RECIPROCAL_MIN = 3
+CONCENTRATION_MIN = 5
+CONCENTRATION_SHARE = 0.8
+UNIFORM_MIN = 10
+BOT_UA_TOKENS = ("bot", "crawler", "spider", "curl", "wget", "python-requests",
+                 "httpx", "aiohttp", "go-http-client", "okhttp", "agent")
+FARM_LIKELY_FLAGS = 2
+
+
+def _now_ts() -> float:
+    return time.time()
+
+
+def _ratings_data() -> dict:
+    data = _load()
+    data.setdefault("published_builds", {})
+    data.setdefault("ratings", {})
+    return data
+
+
+def publish_build(owner: str, build_id, title) -> dict:
+    """Owner is always the authenticated caller. Known gap: build existence is not
+    verified against Blueprint (module independence), so a build_id can be claimed first."""
+    build_id = (build_id or "").strip()
+    title = (title or "").strip()
+    if not build_id:
+        return {"error": "build_id is required"}
+    if not title:
+        return {"error": "title is required"}
+    data = _ratings_data()
+    existing = data["published_builds"].get(build_id)
+    if existing:
+        if existing["owner"] != owner:
+            return {"error": "already_published"}
+        return {"published_build": existing}
+    entry = {"build_id": build_id, "owner": owner, "title": title, "published_at": _now()}
+    data["published_builds"][build_id] = entry
+    _save(data)
+    return {"published_build": entry}
+
+
+def _farm_flags(rater: str, owner: str, build_id: str, score: int,
+                user_agent: str, data: dict, now: float) -> list:
+    key = f"{build_id}:{rater}"
+    ratings = list(data["ratings"].values())
+    others = [r for r in ratings if r["key"] != key]
+    by_rater = [r for r in others if r["rater"] == rater]
+    to_owner = [r for r in by_rater if r["owner"] == owner]
+    from_owner = [r for r in others if r["rater"] == owner and r["owner"] == rater]
+    user = data["users"].get(rater, {})
+    flags = []
+
+    joined = user.get("joined_at")
+    if joined and now - datetime.fromisoformat(joined).timestamp() < NEW_ACCOUNT_SECONDS:
+        flags.append("new_account")
+    recent = [r for r in by_rater if now - r["created_ts"] <= RAPID_WINDOW_SECONDS]
+    if len(recent) + 1 >= RAPID_THRESHOLD:
+        flags.append("rapid_fire")
+    if len(to_owner) + 1 >= RECIPROCAL_MIN and len(from_owner) >= RECIPROCAL_MIN:
+        flags.append("reciprocal_pair")
+    if (len(by_rater) + 1 >= CONCENTRATION_MIN
+            and (len(to_owner) + 1) / (len(by_rater) + 1) >= CONCENTRATION_SHARE):
+        flags.append("concentrated_target")
+    if len(by_rater) + 1 >= UNIFORM_MIN:
+        last = sorted(by_rater, key=lambda r: r["created_ts"])[-(UNIFORM_MIN - 1):]
+        if len({r["score"] for r in last} | {score}) == 1:
+            flags.append("uniform_scores")
+    ua = (user_agent or "").lower()
+    if not ua or any(token in ua for token in BOT_UA_TOKENS):
+        flags.append("automation_client")
+    return flags
+
+
+def _severity(flags: list) -> str:
+    if len(flags) >= FARM_LIKELY_FLAGS:
+        return "likely_farmed"
+    return "review" if flags else "clean"
+
+
+def rate_build(rater: str, build_id: str, score, user_agent: str = "") -> dict:
+    data = _ratings_data()
+    pub = data["published_builds"].get(build_id)
+    if not pub:
+        return {"error": "not_found"}
+    if pub["owner"] == rater:
+        return {"error": "cannot_rate_own"}
+    if not (isinstance(score, int) and not isinstance(score, bool) and score in RATING_SCORES):
+        return {"error": "score must be an integer 1-5"}
+    now = _now_ts()
+    flags = _farm_flags(rater, pub["owner"], build_id, score, user_agent, data, now)
+    key = f"{build_id}:{rater}"
+    data["ratings"][key] = {
+        "key": key, "build_id": build_id, "owner": pub["owner"], "rater": rater,
+        "score": score, "created_ts": now, "flags": flags, "severity": _severity(flags),
+    }
+    _save(data)
+    # Flags are deliberately not returned to the rater.
+    return {"status": "recorded", "build_id": build_id}
+
+
+def _counted(ratings: list) -> list:
+    return [r for r in ratings if r["severity"] != "likely_farmed"]
+
+
+def _average(ratings: list):
+    return round(sum(r["score"] for r in ratings) / len(ratings), 2) if ratings else None
+
+
+def build_rating_summary(build_id: str) -> dict:
+    data = _ratings_data()
+    pub = data["published_builds"].get(build_id)
+    if not pub:
+        return {"error": "not_found"}
+    counted = _counted([r for r in data["ratings"].values() if r["build_id"] == build_id])
+    return {"build_id": build_id, "title": pub["title"], "owner": pub["owner"],
+            "rating_avg": _average(counted), "rating_count": len(counted)}
+
+
+def user_rating_summary(user_handle: str) -> dict:
+    handle = user_handle.strip().lower()
+    data = _ratings_data()
+    if handle not in data["users"]:
+        return {"error": "not_found"}
+    builds = [b for b in data["published_builds"].values() if b["owner"] == handle]
+    counted = _counted([r for r in data["ratings"].values() if r["owner"] == handle])
+    return {"user_handle": handle, "published_builds": len(builds),
+            "rating_avg": _average(counted), "rating_count": len(counted)}
+
+
+def list_flagged_ratings() -> dict:
+    data = _ratings_data()
+    flagged = [r for r in data["ratings"].values() if r["severity"] != "clean"]
+    flagged.sort(key=lambda r: (r["severity"] != "likely_farmed", -r["created_ts"]))
+    return {"ratings": flagged, "count": len(flagged)}
+
+
+@social_routes.route("/published-builds", methods=["POST"])
+@require_auth()
+def route_publish_build():
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    result = publish_build(g.auth_user, body.get("build_id"), body.get("title"))
+    if "error" in result:
+        return jsonify(result), (409 if result["error"] == "already_published" else 400)
+    return jsonify(result), 201
+
+
+@social_routes.route("/published-builds/<build_id>", methods=["GET"])
+def route_get_published_build(build_id):
+    result = build_rating_summary(build_id)
+    if "error" in result:
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+@social_routes.route("/published-builds/<build_id>/ratings", methods=["POST"])
+@require_auth()
+def route_rate_build(build_id):
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    result = rate_build(g.auth_user, build_id, body.get("score"),
+                        request.headers.get("User-Agent", ""))
+    if "error" in result:
+        status = {"not_found": 404, "cannot_rate_own": 403}.get(result["error"], 400)
+        return jsonify(result), status
+    return jsonify(result), 201
+
+
+@social_routes.route("/users/<user_handle>/rating-summary", methods=["GET"])
+def route_user_rating_summary(user_handle):
+    result = user_rating_summary(user_handle)
+    if "error" in result:
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+@social_routes.route("/admin/rating-flags", methods=["GET"])
+@require_auth(admin_only=True)
+def route_rating_flags():
+    return jsonify(list_flagged_ratings())
