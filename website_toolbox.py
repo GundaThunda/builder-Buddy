@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 
+from field_guard import filter_allowed_fields, log_unknown_fields
+
 toolbox_routes = Blueprint("toolbox", __name__)
 
 ITEM_TYPES = {"tool", "upgrade", "hardware", "material"}
@@ -108,16 +110,18 @@ def get_item(item_id: str) -> dict:
     return {"item": item}
 
 
-def update_item(item_id: str, **fields) -> dict:
+def update_item(item_id: str, payload: dict | None = None, **fields) -> dict:
+    merged = {**(payload if isinstance(payload, dict) else {}), **fields}
     data = _load()
     item = data["items"].get(item_id)
     if not item:
         return {"error": "not_found"}
 
     allowed = {"name", "category", "status", "wishlist_rating", "tags", "linked_items"}
-    for key, value in fields.items():
-        if key not in allowed:
-            continue
+    guard = filter_allowed_fields(merged, allowed)
+    if guard.rejected:
+        log_unknown_fields("PATCH /toolbox/items/<id>", item_id, "unauthenticated", guard.rejected)
+    for key, value in guard.applied.items():
         if key == "category":
             value = value if value in CATEGORIES else "Uncategorized"
         if key == "status" and value not in ITEM_STATUSES:
@@ -216,7 +220,7 @@ def route_get_item(item_id):
 @toolbox_routes.route("/items/<item_id>", methods=["PATCH"])
 def route_update_item(item_id):
     body = request.get_json(silent=True) or {}
-    result = update_item(item_id, **body)
+    result = update_item(item_id, body)
     if result.get("error") == "not_found":
         return jsonify(result), 404
     if "error" in result:

@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 
+from field_guard import filter_allowed_fields, log_unknown_fields
+
 blueprint_routes = Blueprint("blueprint", __name__)
 
 PROJECT_TYPES = {"furniture", "storage", "decor", "structural", "repair", "outdoor", "custom"}
@@ -102,7 +104,10 @@ def get_build(build_id: str) -> dict:
     return {"build": build}
 
 
-def update_build(build_id: str, **fields) -> dict:
+def update_build(build_id: str, payload: dict | None = None, **fields) -> dict:
+    # payload is the request body as a dict. Passing it positionally means a body key
+    # named build_id cannot collide with the function argument.
+    merged = {**(payload if isinstance(payload, dict) else {}), **fields}
     data = _load()
     build = data["builds"].get(build_id)
     if not build:
@@ -115,9 +120,10 @@ def update_build(build_id: str, **fields) -> dict:
         "phase", "estimated_hours", "estimated_cost_usd", "actual_cost_usd",
         "notes", "dimensions", "tags"
     }
-    for key, value in fields.items():
-        if key not in allowed:
-            continue
+    guard = filter_allowed_fields(merged, allowed)
+    if guard.rejected:
+        log_unknown_fields("PATCH /blueprint/builds/<id>", build_id, "unauthenticated", guard.rejected)
+    for key, value in guard.applied.items():
         if key == "name":
             value = value.strip()
             if not value:
@@ -517,7 +523,7 @@ def route_get_build(build_id):
 @blueprint_routes.route("/builds/<build_id>", methods=["PATCH"])
 def route_update_build(build_id):
     body = request.get_json(silent=True) or {}
-    result = update_build(build_id, **body)
+    result = update_build(build_id, body)
     if result.get("error") == "not_found":
         return jsonify(result), 404
     if "error" in result:
