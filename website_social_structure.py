@@ -172,6 +172,54 @@ def withdraw_listing(listing_id: str) -> dict:
     return {"listing": listing}
 
 
+# --- Admin profile (server-side only; no route exposes setter) ---
+
+ROLE_ADMIN = "admin"
+PRIVATE_USER_FIELDS = {"profile", "profile_updated_at", "role"}
+
+
+def set_admin_profile(user_handle: str, display_name: str, company: str,
+                      birth_year: int, birth_month: int) -> dict:
+    handle = user_handle.strip().lower()
+    if not handle:
+        return {"error": "user_handle is required"}
+    display_name = display_name.strip()
+    company = company.strip()
+    if not display_name:
+        return {"error": "display_name is required"}
+    if not (isinstance(birth_year, int) and not isinstance(birth_year, bool)
+            and 1900 <= birth_year <= datetime.now(timezone.utc).year):
+        return {"error": "birth_year out of range"}
+    if not (isinstance(birth_month, int) and not isinstance(birth_month, bool)
+            and 1 <= birth_month <= 12):
+        return {"error": "birth_month must be 1-12"}
+    result = get_or_create_user(handle)
+    if "error" in result:
+        return result
+    data = _load()
+    user = data["users"][handle]
+    user["role"] = ROLE_ADMIN
+    user["profile"] = {
+        "display_name": display_name,
+        "company": company,
+        "birth_year": birth_year,
+        "birth_month": birth_month,
+    }
+    user["profile_updated_at"] = _now()
+    _save(data)
+    return {"user_handle": handle, "role": ROLE_ADMIN}
+
+
+def is_admin(user_handle: str) -> bool:
+    data = _load()
+    user = data["users"].get(user_handle.strip().lower())
+    return bool(user) and user.get("role") == ROLE_ADMIN
+
+
+def public_user_view(user: dict) -> dict:
+    return {k: v for k, v in user.items() if k not in PRIVATE_USER_FIELDS}
+
+
 # --- Flask routes ---
 
 @social_routes.route("/users/<user_handle>", methods=["GET"])
@@ -187,7 +235,7 @@ def route_create_user(user_handle):
     result = get_or_create_user(user_handle)
     if "error" in result:
         return jsonify(result), 400
-    return jsonify(result), 201
+    return jsonify({"user": public_user_view(result["user"])}), 201
 
 
 @social_routes.route("/users/<user_handle>/points", methods=["POST"])
