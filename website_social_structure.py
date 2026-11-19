@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 
+from website_gate import require_auth
+
 social_routes = Blueprint("social", __name__)
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "social_data.json")
@@ -255,7 +257,22 @@ def route_get_user(user_handle):
     return jsonify(result)
 
 
+def _owner_from_route_user(kwargs):
+    return kwargs["user_handle"]
+
+
+def _owner_from_body(kwargs):
+    body = request.get_json(silent=True) or {}
+    return body.get("user_handle", "")
+
+
+def _owner_of_listing(kwargs):
+    listing = get_listing(kwargs["listing_id"]).get("listing") or {}
+    return listing.get("user_handle", "")
+
+
 @social_routes.route("/users/<user_handle>", methods=["POST"])
+@require_auth(owner_of=_owner_from_route_user)
 def route_create_user(user_handle):
     result = get_or_create_user(user_handle)
     if "error" in result:
@@ -264,6 +281,7 @@ def route_create_user(user_handle):
 
 
 @social_routes.route("/users/<user_handle>/points", methods=["POST"])
+@require_auth(admin_only=True)
 def route_award_points(user_handle):
     body = request.get_json(silent=True) or {}
     result = award_points(user_handle, body.get("event", ""), body.get("ref_id", ""))
@@ -287,6 +305,7 @@ def route_list_listings():
 
 
 @social_routes.route("/listings", methods=["POST"])
+@require_auth(owner_of=_owner_from_body)
 def route_create_listing():
     body = request.get_json(silent=True) or {}
     result = create_listing(
@@ -310,16 +329,22 @@ def route_get_listing(listing_id):
 
 
 @social_routes.route("/listings/<listing_id>/sell", methods=["PATCH"])
+@require_auth(owner_of=_owner_of_listing)
 def route_sell_listing(listing_id):
     result = mark_listing_sold(listing_id)
+    if result.get("error") == "not_found":
+        return jsonify(result), 404
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)
 
 
 @social_routes.route("/listings/<listing_id>/withdraw", methods=["PATCH"])
+@require_auth(owner_of=_owner_of_listing)
 def route_withdraw_listing(listing_id):
     result = withdraw_listing(listing_id)
+    if result.get("error") == "not_found":
+        return jsonify(result), 404
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)

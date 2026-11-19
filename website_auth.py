@@ -25,11 +25,11 @@ import secrets
 import sys
 import time
 from datetime import datetime, timezone
-from functools import wraps
 
 from flask import Blueprint, g, jsonify, request
 
 import website_social_structure as social
+from website_gate import require_auth
 
 auth_routes = Blueprint("auth", __name__)
 
@@ -237,21 +237,6 @@ def _bearer_token() -> str | None:
     return None
 
 
-def require_auth(admin: bool = False):
-    def decorator(view):
-        @wraps(view)
-        def wrapper(*args, **kwargs):
-            handle = authenticate_token(_bearer_token())
-            if handle is None:
-                return jsonify({"error": "unauthorized"}), 401
-            if admin and not social.is_admin(handle):
-                return jsonify({"error": "forbidden"}), 403
-            g.auth_user = handle
-            return view(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
 # --- routes ---
 
 ROLE_ERROR_STATUS = {"invalid_role": 400, "not_found": 404, "last_admin": 409}
@@ -296,7 +281,7 @@ def route_change_password():
 
 
 @auth_routes.route("/roles/<handle>", methods=["POST"])
-@require_auth(admin=True)
+@require_auth(admin_only=True)
 def route_set_role(handle):
     body = request.get_json(silent=True)
     if not isinstance(body, dict):

@@ -264,3 +264,78 @@ def test_can_demote_admin_when_another_admin_exists(client):
     assert resp.status_code == 200
     assert not ss.is_admin("second")
     assert ss.is_admin("boss")
+
+
+# --- social write gating ---
+
+def _member(handle, password=GOOD):
+    ss.get_or_create_user(handle)
+    assert auth.set_password(handle, password) == {"user_handle": handle}
+    return handle
+
+
+def _new_listing(client, token, handle):
+    return client.post("/social/listings", headers=_bearer(token), json={
+        "user_handle": handle, "build_id": "b1", "title": "Walnut desk", "price_usd": 300})
+
+
+def test_social_write_requires_token(client):
+    _member(HANDLE)
+    assert client.post(f"/social/users/{HANDLE}").status_code == 401
+    assert client.post(f"/social/users/{HANDLE}/points", json={"event": "build_completed"}).status_code == 401
+    assert client.post("/social/listings", json={"user_handle": HANDLE, "title": "x", "price_usd": 1}).status_code == 401
+
+
+def test_social_reads_stay_public(client):
+    assert client.get("/social/leaderboard").status_code == 200
+    assert client.get("/social/listings").status_code == 200
+
+
+def test_member_cannot_award_points(client):
+    _member(HANDLE)
+    token = _token(client)
+    resp = client.post(f"/social/users/{HANDLE}/points", headers=_bearer(token),
+                       json={"event": "build_completed"})
+    assert resp.status_code == 403
+
+
+def test_member_cannot_create_user_for_someone_else(client):
+    _member(HANDLE)
+    token = _token(client)
+    assert client.post("/social/users/someone-else", headers=_bearer(token)).status_code == 403
+    assert client.post(f"/social/users/{HANDLE}", headers=_bearer(token)).status_code == 201
+
+
+def test_member_listing_must_be_own(client):
+    _member(HANDLE)
+    _member("other")
+    token = _token(client)
+    assert _new_listing(client, token, "other").status_code == 403
+    assert _new_listing(client, token, HANDLE).status_code == 201
+
+
+def test_only_owner_or_admin_can_sell_listing(client):
+    _member(HANDLE)
+    _member("other")
+    owner = _token(client)
+    lid = _new_listing(client, owner, HANDLE).get_json()["listing"]["id"]
+    other = _token(client, handle="other")
+    assert client.patch(f"/social/listings/{lid}/sell", headers=_bearer(other)).status_code == 403
+    assert client.patch(f"/social/listings/{lid}/sell", headers=_bearer(owner)).status_code == 200
+
+
+def test_admin_can_withdraw_any_listing(client):
+    _member(HANDLE)
+    _member("boss")
+    ss.set_admin_profile("boss", "Boss", "Boss Co", 1990, 1)
+    owner = _token(client)
+    lid = _new_listing(client, owner, HANDLE).get_json()["listing"]["id"]
+    admin = _token(client, handle="boss")
+    assert client.patch(f"/social/listings/{lid}/withdraw", headers=_bearer(admin)).status_code == 200
+
+
+def test_listing_sell_unknown_id_is_404_for_admin(client):
+    ss.set_admin_profile("boss", "Boss", "Boss Co", 1990, 1)
+    auth.set_password("boss", GOOD)
+    admin = _token(client, handle="boss")
+    assert client.patch("/social/listings/nope/sell", headers=_bearer(admin)).status_code == 404
