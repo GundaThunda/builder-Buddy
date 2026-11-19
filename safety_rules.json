@@ -1,0 +1,41 @@
+{
+  "_note": "Every rule is a DRAFT until a source is verified and status is set to approved. Drafts never fire. Severity: caution | warning | block.",
+  "rules": [
+    {
+      "id": "finish_solvent_respirator",
+      "status": "draft",
+      "category": "respiratory",
+      "severity": "warning",
+      "trigger": {
+        "process_types": ["finishing", "painting", "staining"],
+        "keywords": ["lacquer", "varnish", "polyurethane", "solvent", "spray", "epoxy", "stain"]
+      },
+      "message": "Solvent-based finishes release vapors. Use a respirator rated for organic vapors and ventilate. Match the cartridge to the product's safety data sheet.",
+      "source": ""
+    },
+    {
+      "id": "wood_dust_respirator",
+      "status": "draft",
+      "category": "respiratory",
+      "severity": "caution",
+      "trigger": {
+        "process_types": ["sanding", "routing"],
+        "keywords": ["mdf", "sanding", "dust"]
+      },
+      "message": "Wood and MDF dust is a respiratory hazard. Dust collection plus a fitted respirator for sanding.",
+      "source": ""
+    },
+    {
+      "id": "lifting_rated_equipment",
+      "status": "draft",
+      "category": "lifting",
+      "severity": "warning",
+      "trigger": {
+        "process_types": [],
+        "keywords": ["hoist", "crane", "rigging", "sling", "harness", "lift"]
+      },
+      "message": "Confirm the rated working load limit of every sling, harness and hook exceeds the load. Inspect each one before use.",
+      "source": ""
+    }
+  ]
+}

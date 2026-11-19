@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
 
+import website_safety as safety
 from website_gate import require_auth
 
 plan_routes = Blueprint("plans", __name__)
@@ -184,10 +185,13 @@ def _save_content(rec: dict) -> None:
 
 # --- operations ---
 
-def submit_plan(author: str, body) -> dict:
+def submit_plan(author: str, body, acknowledged=()) -> dict:
     err = _validate_body(body)
     if err:
         return {"error": err}
+    gated = safety.gate(safety.check_plan(body), acknowledged)
+    if gated:
+        return gated
     h = content_hash(body)
     idx = _load_index()
     now = _now()
@@ -213,7 +217,7 @@ def submit_plan(author: str, body) -> dict:
     return {"status": "new", "content_id": content_id, "post_id": post_id}
 
 
-def add_branch(author: str, content_id: str, body) -> dict:
+def add_branch(author: str, content_id: str, body, acknowledged=()) -> dict:
     rec = _load_content(content_id)
     if rec is None:
         return {"error": "not_found"}
@@ -228,6 +232,11 @@ def add_branch(author: str, content_id: str, body) -> dict:
 
     new = canonical_body(body)
     base = rec["body"]
+    # Only hazards this branch adds are gated; the base's hazards were already acknowledged.
+    added_hazards = safety.compare_safety(base, new)["new_in_final"]
+    gated = safety.gate(added_hazards, acknowledged)
+    if gated:
+        return gated
     delta = {"steps": _diff(base["steps"], new["steps"], author),
              "materials": _diff(base["materials"], new["materials"], author)}
     if new["dimensions"] != base["dimensions"]:
@@ -298,17 +307,26 @@ def get_plan(content_id: str) -> dict:
 
 # --- routes ---
 
-def _body_from_request() -> dict:
+def _body_from_request() -> tuple:
     body = request.get_json(silent=True)
-    return body if isinstance(body, dict) else {}
+    if not isinstance(body, dict):
+        return {}, []
+    acknowledged = body.pop("acknowledged", [])
+    if not isinstance(acknowledged, list):
+        acknowledged = []
+    return body, acknowledged
+
+
+SAFETY_STATUS = {"safety_block": 422, "acknowledgement_required": 409}
 
 
 @plan_routes.route("", methods=["POST"])
 @require_auth()
 def route_submit_plan():
-    result = submit_plan(g.auth_user, _body_from_request())
+    body, acknowledged = _body_from_request()
+    result = submit_plan(g.auth_user, body, acknowledged)
     if "error" in result:
-        return jsonify(result), 400
+        return jsonify(result), SAFETY_STATUS.get(result["error"], 400)
     return jsonify(result), 201
 
 
@@ -323,10 +341,11 @@ def route_get_plan(content_id):
 @plan_routes.route("/<content_id>/branches", methods=["POST"])
 @require_auth()
 def route_add_branch(content_id):
-    result = add_branch(g.auth_user, content_id, _body_from_request())
+    body, acknowledged = _body_from_request()
+    result = add_branch(g.auth_user, content_id, body, acknowledged)
     if "error" in result:
         status = {"not_found": 404, "exact_duplicate": 409, "duplicate_branch": 409,
-                  "delta_mismatch": 500}.get(result["error"], 400)
+                  "delta_mismatch": 500, **SAFETY_STATUS}.get(result["error"], 400)
         return jsonify(result), status
     return jsonify(result), 201
 
