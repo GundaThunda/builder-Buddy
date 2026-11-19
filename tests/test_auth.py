@@ -291,10 +291,20 @@ def test_social_reads_stay_public(client):
     assert client.get("/social/listings").status_code == 200
 
 
-def test_member_cannot_award_points(client):
+def test_member_can_award_points_to_self(client):
     _member(HANDLE)
     token = _token(client)
     resp = client.post(f"/social/users/{HANDLE}/points", headers=_bearer(token),
+                       json={"event": "build_completed"})
+    assert resp.status_code == 200
+    assert resp.get_json()["total_points"] == 50
+
+
+def test_member_cannot_award_points_to_someone_else(client):
+    _member(HANDLE)
+    _member("other")
+    token = _token(client)
+    resp = client.post("/social/users/other/points", headers=_bearer(token),
                        json={"event": "build_completed"})
     assert resp.status_code == 403
 
@@ -339,3 +349,30 @@ def test_listing_sell_unknown_id_is_404_for_admin(client):
     auth.set_password("boss", GOOD)
     admin = _token(client, handle="boss")
     assert client.patch("/social/listings/nope/sell", headers=_bearer(admin)).status_code == 404
+
+
+# --- blueprint / toolbox write gating ---
+
+def test_blueprint_writes_require_token(client):
+    assert client.post("/blueprint/builds", json={"name": "Bench"}).status_code == 401
+    assert client.delete("/blueprint/builds/anything").status_code == 401
+
+
+def test_toolbox_writes_require_token(client):
+    assert client.post("/toolbox/items", json={"name": "Saw"}).status_code == 401
+    assert client.patch("/toolbox/items/anything", json={"name": "x"}).status_code == 401
+    assert client.delete("/toolbox/items/anything").status_code == 401
+
+
+def test_blueprint_and_toolbox_reads_stay_public(client):
+    assert client.get("/blueprint/builds").status_code == 200
+    assert client.get("/toolbox/items").status_code == 200
+
+
+def test_member_can_write_blueprint_and_toolbox(client):
+    _member(HANDLE)
+    token = _token(client)
+    resp = client.post("/blueprint/builds", headers=_bearer(token), json={"name": "Bench"})
+    assert resp.status_code == 201
+    resp = client.post("/toolbox/items", headers=_bearer(token), json={"name": "Saw"})
+    assert resp.status_code in (200, 201)

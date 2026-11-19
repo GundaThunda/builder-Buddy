@@ -281,7 +281,7 @@ def route_create_user(user_handle):
 
 
 @social_routes.route("/users/<user_handle>/points", methods=["POST"])
-@require_auth(admin_only=True)
+@require_auth(owner_of=_owner_from_route_user)
 def route_award_points(user_handle):
     body = request.get_json(silent=True) or {}
     result = award_points(user_handle, body.get("event", ""), body.get("ref_id", ""))

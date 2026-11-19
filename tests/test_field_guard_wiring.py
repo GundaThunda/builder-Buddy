@@ -32,10 +32,8 @@ def recorder(monkeypatch):
 
 
 @pytest.fixture
-def client():
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
+def client(admin_client):
+    yield admin_client
 
 
 # --- regression: body key named build_id used to raise TypeError (500) ---

@@ -2,9 +2,17 @@ import uuid
 import json
 import os
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, g, has_app_context, request, jsonify
 
 from field_guard import filter_allowed_fields, log_unknown_fields
+from website_gate import require_auth
+
+
+def _actor() -> str:
+    """Authenticated user for the field guard log; 'unknown' outside a request."""
+    if has_app_context():
+        return g.get("auth_user", "unknown")
+    return "unknown"
 
 blueprint_routes = Blueprint("blueprint", __name__)
 
@@ -122,7 +130,7 @@ def update_build(build_id: str, payload: dict | None = None, **fields) -> dict:
     }
     guard = filter_allowed_fields(merged, allowed)
     if guard.rejected:
-        log_unknown_fields("PATCH /blueprint/builds/<id>", build_id, "unauthenticated", guard.rejected)
+        log_unknown_fields("PATCH /blueprint/builds/<id>", build_id, _actor(), guard.rejected)
     for key, value in guard.applied.items():
         if key == "name":
             value = value.strip()
@@ -492,6 +500,7 @@ def route_search_builds():
 
 
 @blueprint_routes.route("/builds", methods=["POST"])
+@require_auth()
 def route_add_build():
     body = request.get_json(silent=True) or {}
     result = add_build(
@@ -521,6 +530,7 @@ def route_get_build(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>", methods=["PATCH"])
+@require_auth()
 def route_update_build(build_id):
     body = request.get_json(silent=True) or {}
     result = update_build(build_id, body)
@@ -532,6 +542,7 @@ def route_update_build(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/status", methods=["PATCH"])
+@require_auth()
 def route_set_status(build_id):
     body = request.get_json(silent=True) or {}
     result = set_build_status(build_id, body.get("status", ""))
@@ -543,6 +554,7 @@ def route_set_status(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>", methods=["DELETE"])
+@require_auth()
 def route_delete_build(build_id):
     result = delete_build(build_id)
     if "error" in result:
@@ -551,6 +563,7 @@ def route_delete_build(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps", methods=["POST"])
+@require_auth()
 def route_add_step(build_id):
     body = request.get_json(silent=True) or {}
     result = add_step(
@@ -570,6 +583,7 @@ def route_add_step(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/<step_id>", methods=["PATCH"])
+@require_auth()
 def route_update_step(build_id, step_id):
     body = request.get_json(silent=True) or {}
     result = update_step(build_id, step_id, **body)
@@ -579,6 +593,7 @@ def route_update_step(build_id, step_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/<step_id>/complete", methods=["PATCH"])
+@require_auth()
 def route_complete_step(build_id, step_id):
     body = request.get_json(silent=True) or {}
     result = complete_step(build_id, step_id, completed=body.get("completed", True))
@@ -588,6 +603,7 @@ def route_complete_step(build_id, step_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/reorder", methods=["PATCH"])
+@require_auth()
 def route_reorder_steps(build_id):
     body = request.get_json(silent=True) or {}
     result = reorder_steps(build_id, body.get("step_ids", []))
@@ -597,6 +613,7 @@ def route_reorder_steps(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/<step_id>", methods=["DELETE"])
+@require_auth()
 def route_delete_step(build_id, step_id):
     result = delete_step(build_id, step_id)
     if "error" in result:
@@ -605,6 +622,7 @@ def route_delete_step(build_id, step_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials", methods=["POST"])
+@require_auth()
 def route_add_material(build_id):
     body = request.get_json(silent=True) or {}
     result = add_material(
@@ -625,6 +643,7 @@ def route_add_material(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials/<material_id>", methods=["PATCH"])
+@require_auth()
 def route_update_material(build_id, material_id):
     body = request.get_json(silent=True) or {}
     result = update_material(build_id, material_id, **body)
@@ -634,6 +653,7 @@ def route_update_material(build_id, material_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials/<material_id>/sourced", methods=["PATCH"])
+@require_auth()
 def route_mark_sourced(build_id, material_id):
     body = request.get_json(silent=True) or {}
     result = mark_material_sourced(build_id, material_id, sourced=body.get("sourced", True))
@@ -643,6 +663,7 @@ def route_mark_sourced(build_id, material_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials/<material_id>", methods=["DELETE"])
+@require_auth()
 def route_delete_material(build_id, material_id):
     result = delete_material(build_id, material_id)
     if "error" in result:
@@ -651,6 +672,7 @@ def route_delete_material(build_id, material_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/tools", methods=["POST"])
+@require_auth()
 def route_link_tool(build_id):
     body = request.get_json(silent=True) or {}
     result = link_tool(build_id, body.get("tool_id", ""))
@@ -660,6 +682,7 @@ def route_link_tool(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/tools/<tool_id>", methods=["DELETE"])
+@require_auth()
 def route_unlink_tool(build_id, tool_id):
     result = unlink_tool(build_id, tool_id)
     if "error" in result:
