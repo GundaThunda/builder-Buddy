@@ -1,29 +1,32 @@
 """
-Plan content store: one record per unique plan body, branches grouped in their
-own file under the base record, and separate download counters.
+Plan content store: one record per unique plan body, branches stored as
+step-level deltas against the original, and separate download counters.
 
 Layout (STORE_DIR, gitignored):
   index.json          hash -> content_id, plus one post record per submission
   <content_id>.json   base record: original author, body, x, branches, y
 
+Branches store only the operations that differ from the base. Every operation
+records its uploader, and every step or material in a branch carries an owner:
+the original author if untouched, or the branch uploader if changed. A branch
+is rebuilt from base + delta and must hash to exactly the uploaded plan, or it
+is refused.
+
 Counters:
   downloads_x  downloads of the original content, including reposts of it
-  downloads_y  downloads of branches (matches) linked to the original
-
-Attribution:
-  original_author is fixed on the base record. Reposts never change it.
-  Each branch records its own uploader.
+  downloads_y  downloads of branches linked to the original
 
 Not built yet: near-duplicate detection, notifications, disputes, match rules.
 """
 
+import difflib
 import hashlib
 import json
 import os
 import uuid
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from website_gate import require_auth
 
@@ -87,6 +90,61 @@ def _validate_body(body) -> str | None:
     if not steps and not materials:
         return "plan body is empty"
     return None
+
+
+# --- deltas and attribution ---
+
+def _diff(base_items: list, new_items: list, uploader: str) -> list:
+    """Ordered operations turning base_items into new_items. Equal runs are not stored."""
+    base_keys = [_json(i) for i in base_items]
+    new_keys = [_json(i) for i in new_items]
+    matcher = difflib.SequenceMatcher(None, base_keys, new_keys, autojunk=False)
+    ops = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        ops.append({"op": tag, "base_start": i1, "base_end": i2,
+                    "new_items": new_items[j1:j2], "uploader": uploader})
+    return ops
+
+
+def _apply_pairs(base_items: list, base_owner: str, ops: list) -> list:
+    """Apply ops to (item, owner) pairs. Opcodes are ordered and non-overlapping,
+    so applying them last-to-first keeps earlier indices valid."""
+    pairs = [(item, base_owner) for item in base_items]
+    for op in reversed(ops):
+        replacement = [(item, op["uploader"]) for item in op["new_items"]]
+        pairs[op["base_start"]:op["base_end"]] = replacement
+    return pairs
+
+
+def _reconstruct(base: dict, delta: dict, author: str) -> dict:
+    """Rebuild a full canonical body from the base plus a delta, with per-item owners."""
+    steps = _apply_pairs(base["steps"], author, delta.get("steps", []))
+    materials = _apply_pairs(base["materials"], author, delta.get("materials", []))
+    dims_owner = delta["dimensions"]["uploader"] if "dimensions" in delta else author
+    dims = delta["dimensions"]["to"] if "dimensions" in delta else base["dimensions"]
+    return {
+        "body": {"steps": [i for i, _ in steps],
+                 "materials": [i for i, _ in materials],
+                 "dimensions": dims},
+        "step_owners": [o for _, o in steps],
+        "material_owners": [o for _, o in materials],
+        "dimensions_owner": dims_owner,
+    }
+
+
+def _changes_summary(delta: dict) -> list:
+    changes = []
+    for field in ("steps", "materials"):
+        for op in delta.get(field, []):
+            changes.append({"field": field, "op": op["op"],
+                            "base_range": [op["base_start"], op["base_end"]],
+                            "uploader": op["uploader"]})
+    if "dimensions" in delta:
+        changes.append({"field": "dimensions", "op": "replace",
+                        "uploader": delta["dimensions"]["uploader"]})
+    return changes
 
 
 # --- storage ---
@@ -167,10 +225,23 @@ def add_branch(author: str, content_id: str, body) -> dict:
         return {"error": "exact_duplicate"}
     if any(b["hash"] == h for b in rec["branches"].values()):
         return {"error": "duplicate_branch"}
+
+    new = canonical_body(body)
+    base = rec["body"]
+    delta = {"steps": _diff(base["steps"], new["steps"], author),
+             "materials": _diff(base["materials"], new["materials"], author)}
+    if new["dimensions"] != base["dimensions"]:
+        delta["dimensions"] = {"from": base["dimensions"], "to": new["dimensions"],
+                               "uploader": author}
+
+    rebuilt = _reconstruct(base, delta, rec["original_author"])["body"]
+    if content_hash(rebuilt) != h:
+        return {"error": "delta_mismatch"}
+
     branch_id = str(uuid.uuid4())
     rec["branches"][branch_id] = {
         "branch_id": branch_id, "uploader": author, "hash": h,
-        "body": canonical_body(body), "created_at": _now(), "downloads": 0,
+        "delta": delta, "created_at": _now(), "downloads": 0,
     }
     _save_content(rec)
     return {"branch_id": branch_id, "content_id": content_id}
@@ -198,6 +269,22 @@ def get_plan(content_id: str) -> dict:
     if rec is None:
         return {"error": "not_found"}
     posts = sum(1 for p in _load_index()["posts"].values() if p["content_id"] == content_id)
+    branches = []
+    for b in rec["branches"].values():
+        rebuilt = _reconstruct(rec["body"], b["delta"], rec["original_author"])
+        branches.append({
+            "branch_id": b["branch_id"],
+            "uploader": b["uploader"],
+            "created_at": b["created_at"],
+            "downloads": b["downloads"],
+            "body": rebuilt["body"],
+            "attribution": {
+                "step_owners": rebuilt["step_owners"],
+                "material_owners": rebuilt["material_owners"],
+                "dimensions_owner": rebuilt["dimensions_owner"],
+            },
+            "changes": _changes_summary(b["delta"]),
+        })
     return {
         "content_id": content_id,
         "original_author": rec["original_author"],
@@ -205,11 +292,7 @@ def get_plan(content_id: str) -> dict:
         "downloads_x": rec["downloads_x"],
         "downloads_y": rec["downloads_y"],
         "post_count": posts,
-        "branches": [
-            {"branch_id": b["branch_id"], "uploader": b["uploader"],
-             "created_at": b["created_at"], "downloads": b["downloads"], "body": b["body"]}
-            for b in rec["branches"].values()
-        ],
+        "branches": branches,
     }
 
 
@@ -223,7 +306,6 @@ def _body_from_request() -> dict:
 @plan_routes.route("", methods=["POST"])
 @require_auth()
 def route_submit_plan():
-    from flask import g
     result = submit_plan(g.auth_user, _body_from_request())
     if "error" in result:
         return jsonify(result), 400
@@ -241,11 +323,10 @@ def route_get_plan(content_id):
 @plan_routes.route("/<content_id>/branches", methods=["POST"])
 @require_auth()
 def route_add_branch(content_id):
-    from flask import g
     result = add_branch(g.auth_user, content_id, _body_from_request())
     if "error" in result:
-        status = {"not_found": 404, "exact_duplicate": 409, "duplicate_branch": 409}.get(
-            result["error"], 400)
+        status = {"not_found": 404, "exact_duplicate": 409, "duplicate_branch": 409,
+                  "delta_mismatch": 500}.get(result["error"], 400)
         return jsonify(result), status
     return jsonify(result), 201
 

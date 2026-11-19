@@ -245,3 +245,97 @@ def test_backup_copies_existing_files(tmp_path):
     copies = migrate.backup([str(src), str(tmp_path / "missing.json")], str(tmp_path / "bk"))
     assert len(copies) == 1
     assert os.path.exists(copies[0])
+
+
+# --- step-level deltas and per-change attribution ---
+
+def test_branch_stores_only_changed_steps():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    tweak = _body(steps=[
+        {"title": "Cut sides", "process_type": "crosscutting", "estimated_minutes": 10},
+        {"title": "Glue up with clamps", "process_type": "gluing", "estimated_minutes": 30},
+    ])
+    bid = store.add_branch("bob", cid, tweak)["branch_id"]
+    rec = store._load_content(cid)
+    delta_steps = rec["branches"][bid]["delta"]["steps"]
+    assert len(delta_steps) == 1
+    assert delta_steps[0]["op"] == "replace"
+    assert delta_steps[0]["uploader"] == "bob"
+    assert "body" not in rec["branches"][bid]
+
+
+def test_reconstructed_branch_matches_uploaded_plan():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    tweak = _body(steps=[
+        {"title": "Cut sides", "process_type": "crosscutting", "estimated_minutes": 10},
+        {"title": "Dry fit", "process_type": "assembly", "estimated_minutes": 5},
+        {"title": "Glue up", "process_type": "gluing", "estimated_minutes": 30},
+    ], materials=[{"name": "Pine 1x12", "qty": 3, "unit": "bf", "species_or_grade": "#2"},
+                  {"name": "Screws", "qty": 1, "unit": "bag"}])
+    add_result = store.add_branch("bob", cid, tweak)
+    assert "branch_id" in add_result
+    branch = store.get_plan(cid)["branches"][0]
+    assert store.content_hash(branch["body"]) == store.content_hash(tweak)
+
+
+def test_attribution_credits_untouched_to_original_and_changes_to_uploader():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    tweak = _body(steps=[
+        {"title": "Cut sides", "process_type": "crosscutting", "estimated_minutes": 10},
+        {"title": "Glue up with clamps", "process_type": "gluing", "estimated_minutes": 30},
+    ])
+    store.add_branch("bob", cid, tweak)
+    attr = store.get_plan(cid)["branches"][0]["attribution"]
+    assert attr["step_owners"] == ["alice", "bob"]
+    assert attr["material_owners"] == ["alice", "alice"]
+    assert attr["dimensions_owner"] == "alice"
+
+
+def test_added_step_is_attributed_to_uploader():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    tweak = _body(steps=_body()["steps"] + [{"title": "Finish", "process_type": "finishing"}])
+    store.add_branch("bob", cid, tweak)
+    branch = store.get_plan(cid)["branches"][0]
+    assert branch["attribution"]["step_owners"] == ["alice", "alice", "bob"]
+    assert branch["changes"][0]["op"] == "insert"
+
+
+def test_removed_step_recorded_as_delete():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    tweak = _body(steps=_body()["steps"][:1])
+    store.add_branch("bob", cid, tweak)
+    branch = store.get_plan(cid)["branches"][0]
+    assert branch["attribution"]["step_owners"] == ["alice"]
+    assert branch["changes"][0]["op"] == "delete"
+
+
+def test_dimension_change_credited_to_uploader():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    store.add_branch("bob", cid, _body(dimensions={"width_in": 26}))
+    branch = store.get_plan(cid)["branches"][0]
+    assert branch["attribution"]["dimensions_owner"] == "bob"
+    assert branch["body"]["dimensions"] == {"width_in": 26}
+
+
+def test_two_branches_keep_separate_attribution_against_base():
+    cid = store.submit_plan("alice", _body())["content_id"]
+    store.add_branch("bob", cid, _body(steps=[
+        {"title": "Cut sides", "process_type": "crosscutting", "estimated_minutes": 10},
+        {"title": "Glue up", "process_type": "gluing", "estimated_minutes": 45},
+    ]))
+    store.add_branch("carol", cid, _body(dimensions={"width_in": 30}))
+    branches = {b["uploader"]: b for b in store.get_plan(cid)["branches"]}
+    assert branches["bob"]["attribution"]["step_owners"] == ["alice", "bob"]
+    assert branches["bob"]["attribution"]["dimensions_owner"] == "alice"
+    assert branches["carol"]["attribution"]["step_owners"] == ["alice", "alice"]
+    assert branches["carol"]["attribution"]["dimensions_owner"] == "carol"
+
+
+def test_adjacent_insert_and_replace_round_trip():
+    # Regression for opcode ordering: insert and replace at the same base index.
+    base = _body(steps=[{"title": "A"}, {"title": "B"}, {"title": "C"}])
+    cid = store.submit_plan("alice", base)["content_id"]
+    tweak = _body(steps=[{"title": "A"}, {"title": "NEW"}, {"title": "B2"}, {"title": "C"}])
+    assert "branch_id" in store.add_branch("bob", cid, tweak)
+    branch = store.get_plan(cid)["branches"][0]
+    assert store.content_hash(branch["body"]) == store.content_hash(tweak)
