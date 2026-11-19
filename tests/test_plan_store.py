@@ -4,6 +4,7 @@ import os
 import pytest
 
 import migrate_plan_store as migrate
+import website_safety as safety
 import website_auth as auth
 import website_plan_store as store
 import website_social_structure as ss
@@ -15,6 +16,8 @@ GOOD = "correct horse battery"
 @pytest.fixture(autouse=True)
 def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "STORE_DIR", str(tmp_path / "plan_store"))
+    # Generic safety warnings are tested in test_safety.py; off here so plan-structure tests stay focused.
+    monkeypatch.setattr(safety, "GENERIC_RULES", [])
     yield
 
 

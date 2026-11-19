@@ -24,6 +24,42 @@ RULES_PATH = os.path.join(os.path.dirname(__file__), "safety_rules.json")
 RULES_OVERRIDE = None
 
 
+# Generic warnings for high-risk steps. They cite no standard and set no thresholds,
+# so they fire without a sourced rule. Their wording still needs review.
+GENERIC_RULES = [
+    {
+        "id": "general_power_tool",
+        "status": "approved",
+        "source": "General shop safety practice. No specific standard cited. Wording pending review.",
+        "category": "power_tool",
+        "severity": "warning",
+        "trigger": {
+            "process_types": ["milling", "ripping", "crosscutting", "routing", "turning",
+                              "drilling", "sanding", "carving"],
+            "keywords": ["table saw", "tablesaw", "router", "planer", "jointer", "bandsaw",
+                         "band saw", "miter saw", "chop saw", "drill", "sander", "lathe",
+                         "rip ", "crosscut", "circular saw", "jigsaw"],
+        },
+        "message": "Power tool work. Confirm guards and safety devices are in place and working, "
+                   "and follow the tool manufacturer's instructions for this operation.",
+    },
+    {
+        "id": "general_finishing",
+        "status": "approved",
+        "source": "General shop safety practice. No specific standard cited. Wording pending review.",
+        "category": "finishing",
+        "severity": "warning",
+        "trigger": {
+            "process_types": ["finishing", "painting", "staining"],
+            "keywords": ["lacquer", "varnish", "polyurethane", "stain", "paint", "solvent",
+                         "epoxy", "spray"],
+        },
+        "message": "Finishing products can release vapors or dust. Ventilate the work area and "
+                   "follow the product label and safety data sheet.",
+    },
+]
+
+
 def load_rules() -> list:
     if RULES_OVERRIDE is not None:
         return RULES_OVERRIDE
@@ -55,7 +91,7 @@ def _matches(rule: dict, text: str, process_type: str | None) -> bool:
 
 
 def check_plan(body: dict, rules: list | None = None) -> list:
-    rules = active_rules(load_rules() if rules is None else rules)
+    rules = active_rules(load_rules() if rules is None else rules) + active_rules(GENERIC_RULES)
     found = []
     for i, step in enumerate(body.get("steps", [])):
         text = _step_text(step)

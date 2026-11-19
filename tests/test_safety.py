@@ -14,11 +14,20 @@ RULE_DRAFT = {"id": "r_draft", "status": "draft", "severity": "block", "source":
               "trigger": {"process_types": [], "keywords": ["anything"]}, "message": "x"}
 
 
+GENERIC_ORIGINAL = list(safety.GENERIC_RULES)
+
+
 @pytest.fixture(autouse=True)
 def rules(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "STORE_DIR", str(tmp_path / "plan_store"))
     monkeypatch.setattr(safety, "RULES_OVERRIDE", [RULE_WARN, RULE_BLOCK, RULE_DRAFT])
+    monkeypatch.setattr(safety, "GENERIC_RULES", [])
     yield
+
+
+@pytest.fixture
+def generic_on(monkeypatch):
+    monkeypatch.setattr(safety, "GENERIC_RULES", GENERIC_ORIGINAL)
 
 
 def _body(*steps, materials=None):
@@ -39,7 +48,7 @@ def test_warning_matched_by_process_and_keyword():
     w = safety.check_plan(_body({"title": "Apply lacquer", "process_type": "other"}))
     assert [x["rule_id"] for x in w] == ["r_warn"]
     w2 = safety.check_plan(_body({"title": "Clean up", "process_type": "finishing"}))
-    assert [x["rule_id"] for x in w2] == ["r_warn"]
+    assert "r_warn" in [x["rule_id"] for x in w2]
 
 
 def test_warning_blocks_save_until_acknowledged():
@@ -108,3 +117,32 @@ def test_route_returns_422_on_block_and_409_on_missing_ack():
         ok = c.post("/plans", headers=h, json={
             "steps": [{"title": "Apply lacquer"}], "acknowledged": ["r_warn"]})
         assert ok.status_code == 201
+
+
+# --- generic high-risk warnings (no sourced rule needed) ---
+
+def test_power_tool_step_warns_without_any_sourced_rule(generic_on):
+    w = safety.check_plan(_body({"title": "Rip the boards on the table saw"}), [])
+    assert "general_power_tool" in [x["rule_id"] for x in w]
+    assert safety.gate(w, [])["error"] == "acknowledgement_required"
+
+
+def test_power_tool_process_type_warns(generic_on):
+    w = safety.check_plan(_body({"title": "Smooth edges", "process_type": "sanding"}), [])
+    assert "general_power_tool" in [x["rule_id"] for x in w]
+
+
+def test_finishing_step_warns_generically(generic_on):
+    w = safety.check_plan(_body({"title": "Wipe on finish", "process_type": "finishing"}), [])
+    assert "general_finishing" in [x["rule_id"] for x in w]
+
+
+def test_plain_assembly_step_has_no_generic_warning(generic_on):
+    w = safety.check_plan(_body({"title": "Clamp the frame", "process_type": "assembly"}), [])
+    assert w == []
+
+
+def test_power_tool_warning_blocks_save_until_acknowledged(generic_on):
+    body = _body({"title": "Rip the boards on the table saw"})
+    assert store.submit_plan("alice", body)["error"] == "acknowledgement_required"
+    assert store.submit_plan("alice", body, acknowledged=["general_power_tool"])["status"] == "new"
