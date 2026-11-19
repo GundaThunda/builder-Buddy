@@ -12,3 +12,8 @@ build/
 .env
 venv/
 .venv/
+social_data.json
+blueprint_data.json
+tips_data.json
+ron_g_data.json
+auth_data.json

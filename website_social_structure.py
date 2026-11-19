@@ -216,6 +216,31 @@ def is_admin(user_handle: str) -> bool:
     return bool(user) and user.get("role") == ROLE_ADMIN
 
 
+ROLE_MEMBER = "member"
+VALID_ROLES = {ROLE_ADMIN, ROLE_MEMBER}
+
+
+def admin_handles() -> list:
+    data = _load()
+    return sorted(h for h, u in data["users"].items() if u.get("role") == ROLE_ADMIN)
+
+
+def set_role(user_handle: str, role) -> dict:
+    """Error codes: invalid_role, not_found, last_admin. Callers map these to HTTP."""
+    handle = user_handle.strip().lower()
+    if role not in VALID_ROLES:
+        return {"error": "invalid_role"}
+    data = _load()
+    user = data["users"].get(handle)
+    if not user:
+        return {"error": "not_found"}
+    if user.get("role") == ROLE_ADMIN and role != ROLE_ADMIN and len(admin_handles()) == 1:
+        return {"error": "last_admin"}
+    user["role"] = role
+    _save(data)
+    return {"user_handle": handle, "role": role}
+
+
 def public_user_view(user: dict) -> dict:
     return {k: v for k, v in user.items() if k not in PRIVATE_USER_FIELDS}
 
