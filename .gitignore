@@ -17,3 +17,5 @@ blueprint_data.json
 tips_data.json
 ron_g_data.json
 auth_data.json
+plan_store/
+plan_backups/
