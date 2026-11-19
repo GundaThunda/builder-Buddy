@@ -24,38 +24,70 @@ RULES_PATH = os.path.join(os.path.dirname(__file__), "safety_rules.json")
 RULES_OVERRIDE = None
 
 
-# Generic warnings for high-risk steps. They cite no standard and set no thresholds,
-# so they fire without a sourced rule. Their wording still needs review.
+# Generic warnings. They cite no standard and set no thresholds, so they fire without a
+# sourced rule. Their wording still needs review.
+#   scope "plan": at most one warning per plan, on the first matching step.
+#   scope "step": one warning on every matching step.
+POWER_PROCESS_TYPES = ["milling", "ripping", "crosscutting", "routing", "turning",
+                       "drilling", "sanding", "carving"]
+POWER_KEYWORDS = ["table saw", "tablesaw", "router", "planer", "jointer", "bandsaw",
+                  "band saw", "miter saw", "chop saw", "drill", "sander", "lathe",
+                  "rip ", "crosscut", "circular saw", "jigsaw"]
+FINISH_KEYWORDS = ["lacquer", "varnish", "polyurethane", "stain", "paint", "solvent",
+                   "epoxy", "spray", "voc"]
+GENERIC_SOURCE = "General shop safety practice. No specific standard cited. Wording pending review."
+
 GENERIC_RULES = [
     {
-        "id": "general_power_tool",
-        "status": "approved",
-        "source": "General shop safety practice. No specific standard cited. Wording pending review.",
-        "category": "power_tool",
-        "severity": "warning",
-        "trigger": {
-            "process_types": ["milling", "ripping", "crosscutting", "routing", "turning",
-                              "drilling", "sanding", "carving"],
-            "keywords": ["table saw", "tablesaw", "router", "planer", "jointer", "bandsaw",
-                         "band saw", "miter saw", "chop saw", "drill", "sander", "lathe",
-                         "rip ", "crosscut", "circular saw", "jigsaw"],
-        },
-        "message": "Power tool work. Confirm guards and safety devices are in place and working, "
-                   "and follow the tool manufacturer's instructions for this operation.",
+        "id": "general_power_tool", "status": "approved", "scope": "plan",
+        "source": GENERIC_SOURCE, "category": "power_tool", "severity": "warning",
+        "trigger": {"process_types": POWER_PROCESS_TYPES, "keywords": POWER_KEYWORDS},
+        "message": "This plan uses power tools. Confirm guards and safety devices are in place "
+                   "and working, and follow each tool manufacturer's instructions.",
     },
     {
-        "id": "general_finishing",
-        "status": "approved",
-        "source": "General shop safety practice. No specific standard cited. Wording pending review.",
-        "category": "finishing",
-        "severity": "warning",
-        "trigger": {
-            "process_types": ["finishing", "painting", "staining"],
-            "keywords": ["lacquer", "varnish", "polyurethane", "stain", "paint", "solvent",
-                         "epoxy", "spray"],
-        },
-        "message": "Finishing products can release vapors or dust. Ventilate the work area and "
-                   "follow the product label and safety data sheet.",
+        "id": "hr_ripping", "status": "approved", "scope": "step",
+        "source": GENERIC_SOURCE, "category": "power_tool", "severity": "warning",
+        "trigger": {"process_types": ["ripping"], "keywords": ["rip ", "table saw", "tablesaw"]},
+        "message": "High-risk: ripping on a table saw can kick the workpiece back toward you. "
+                   "Use the riving knife and fence, and keep hands out of the blade path.",
+    },
+    {
+        "id": "hr_routing", "status": "approved", "scope": "step",
+        "source": GENERIC_SOURCE, "category": "power_tool", "severity": "warning",
+        "trigger": {"process_types": ["routing"], "keywords": ["router"]},
+        "message": "High-risk: a router spins fast and can grab or kick a loose workpiece. "
+                   "Clamp or secure the work and take shallow passes.",
+    },
+    {
+        "id": "hr_turning", "status": "approved", "scope": "step",
+        "source": GENERIC_SOURCE, "category": "power_tool", "severity": "warning",
+        "trigger": {"process_types": ["turning"], "keywords": ["lathe"]},
+        "message": "High-risk: an unbalanced or loose workpiece on a lathe can be thrown. "
+                   "Check mounting and balance before starting, and keep the tool rest and guard in place.",
+    },
+    {
+        "id": "hr_jointer_planer", "status": "approved", "scope": "step",
+        "source": GENERIC_SOURCE, "category": "power_tool", "severity": "warning",
+        "trigger": {"process_types": [], "keywords": ["jointer", "planer"]},
+        "message": "High-risk: jointers and planers can kick a board back or pull fingers toward "
+                   "the cutterhead. Use push blocks and keep hands clear of the cutters.",
+    },
+    {
+        "id": "mask_finish_voc", "status": "approved", "scope": "step",
+        "source": GENERIC_SOURCE, "category": "finishing", "severity": "warning",
+        "trigger": {"process_types": ["finishing", "painting", "staining"],
+                    "keywords": FINISH_KEYWORDS},
+        "message": "Wear a respirator rated for organic vapors (VOCs) before each application. "
+                   "Ventilate the area and keep solvents away from ignition sources.",
+    },
+    {
+        "id": "mask_particulate", "status": "approved", "scope": "step",
+        "source": GENERIC_SOURCE, "category": "dust", "severity": "warning",
+        "trigger": {"process_types": ["sanding", "milling"],
+                    "keywords": ["sanding", "sander", "mdf", "milling"]},
+        "message": "Wear a particulate respirator or dust mask. Sanding and milling release fine "
+                   "dust that can reach deep in the lungs.",
     },
 ]
 
@@ -91,17 +123,25 @@ def _matches(rule: dict, text: str, process_type: str | None) -> bool:
 
 
 def check_plan(body: dict, rules: list | None = None) -> list:
-    rules = active_rules(load_rules() if rules is None else rules) + active_rules(GENERIC_RULES)
+    user_rules = active_rules(load_rules() if rules is None else rules)
+    generic = active_rules(GENERIC_RULES)
     found = []
+    seen_plan_scope = set()
     for i, step in enumerate(body.get("steps", [])):
         text = _step_text(step)
-        for rule in rules:
-            if _matches(rule, text, step.get("process_type")):
-                found.append({"rule_id": rule["id"], "severity": rule["severity"],
-                              "message": rule["message"], "where": f"step:{i + 1}"})
+        for rule in user_rules + generic:
+            if not _matches(rule, text, step.get("process_type")):
+                continue
+            if rule.get("scope") == "plan":
+                if rule["id"] in seen_plan_scope:
+                    continue
+                seen_plan_scope.add(rule["id"])
+            found.append({"rule_id": rule["id"], "severity": rule["severity"],
+                          "message": rule["message"], "where": f"step:{i + 1}"})
+    # Generic rules are step-level only. Material names must not trigger them.
     for m in body.get("materials", []):
         text = _material_text(m)
-        for rule in rules:
+        for rule in user_rules:
             if _matches(rule, text, None):
                 found.append({"rule_id": rule["id"], "severity": rule["severity"],
                               "message": rule["message"], "where": f"material:{m.get('name')}"})
