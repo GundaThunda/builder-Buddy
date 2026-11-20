@@ -57,7 +57,8 @@ def add_build(name: str, description: str = "", project_type: str = "custom",
               skill_level: str = "beginner", difficulty: int = 1,
               phase: str = "planning", estimated_hours: float = 0.0,
               estimated_cost_usd: float = 0.0, notes: str = "",
-              dimensions: dict | None = None, tags: list | None = None) -> dict:
+              dimensions: dict | None = None, tags: list | None = None,
+              owner: str = "") -> dict:
     name = name.strip()
     if not name:
         return {"error": "name is required"}
@@ -78,6 +79,7 @@ def add_build(name: str, description: str = "", project_type: str = "custom",
     now = _now()
     build = {
         "id": build_id,
+        "owner": (owner or "").strip().lower(),
         "name": name,
         "description": description,
         "project_type": project_type,
@@ -486,6 +488,12 @@ def unlink_tool(build_id: str, tool_id: str) -> dict:
 
 # --- Flask routes ---
 
+def _build_owner(kwargs) -> str:
+    """Owner handle of the build named in the route. Legacy builds with no owner return ''."""
+    build = get_build(kwargs["build_id"]).get("build") or {}
+    return build.get("owner", "")
+
+
 @blueprint_routes.route("/builds", methods=["GET"])
 def route_list_builds():
     return jsonify(list_builds(
@@ -520,6 +528,7 @@ def route_add_build():
         notes=body.get("notes", ""),
         dimensions=body.get("dimensions"),
         tags=body.get("tags"),
+        owner=g.auth_user,
     )
     if "error" in result:
         return jsonify(result), 400
@@ -535,7 +544,7 @@ def route_get_build(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_update_build(build_id):
     body = request.get_json(silent=True) or {}
     result = update_build(build_id, body)
@@ -547,7 +556,7 @@ def route_update_build(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/status", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_set_status(build_id):
     body = request.get_json(silent=True) or {}
     result = set_build_status(build_id, body.get("status", ""))
@@ -559,7 +568,7 @@ def route_set_status(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>", methods=["DELETE"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_delete_build(build_id):
     result = delete_build(build_id)
     if "error" in result:
@@ -568,7 +577,7 @@ def route_delete_build(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps", methods=["POST"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_add_step(build_id):
     body = request.get_json(silent=True) or {}
     result = add_step(
@@ -588,7 +597,7 @@ def route_add_step(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/<step_id>", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_update_step(build_id, step_id):
     body = request.get_json(silent=True) or {}
     result = update_step(build_id, step_id, body)
@@ -598,7 +607,7 @@ def route_update_step(build_id, step_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/<step_id>/complete", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_complete_step(build_id, step_id):
     body = request.get_json(silent=True) or {}
     result = complete_step(build_id, step_id, completed=body.get("completed", True))
@@ -608,7 +617,7 @@ def route_complete_step(build_id, step_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/reorder", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_reorder_steps(build_id):
     body = request.get_json(silent=True) or {}
     result = reorder_steps(build_id, body.get("step_ids", []))
@@ -618,7 +627,7 @@ def route_reorder_steps(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/steps/<step_id>", methods=["DELETE"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_delete_step(build_id, step_id):
     result = delete_step(build_id, step_id)
     if "error" in result:
@@ -627,7 +636,7 @@ def route_delete_step(build_id, step_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials", methods=["POST"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_add_material(build_id):
     body = request.get_json(silent=True) or {}
     result = add_material(
@@ -648,7 +657,7 @@ def route_add_material(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials/<material_id>", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_update_material(build_id, material_id):
     body = request.get_json(silent=True) or {}
     result = update_material(build_id, material_id, body)
@@ -658,7 +667,7 @@ def route_update_material(build_id, material_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials/<material_id>/sourced", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_mark_sourced(build_id, material_id):
     body = request.get_json(silent=True) or {}
     result = mark_material_sourced(build_id, material_id, sourced=body.get("sourced", True))
@@ -668,7 +677,7 @@ def route_mark_sourced(build_id, material_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/materials/<material_id>", methods=["DELETE"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_delete_material(build_id, material_id):
     result = delete_material(build_id, material_id)
     if "error" in result:
@@ -677,7 +686,7 @@ def route_delete_material(build_id, material_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/tools", methods=["POST"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_link_tool(build_id):
     body = request.get_json(silent=True) or {}
     result = link_tool(build_id, body.get("tool_id", ""))
@@ -687,7 +696,7 @@ def route_link_tool(build_id):
 
 
 @blueprint_routes.route("/builds/<build_id>/tools/<tool_id>", methods=["DELETE"])
-@require_auth()
+@require_auth(owner_of=_build_owner)
 def route_unlink_tool(build_id, tool_id):
     result = unlink_tool(build_id, tool_id)
     if "error" in result:

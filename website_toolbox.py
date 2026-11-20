@@ -69,7 +69,8 @@ def _find_duplicates(data: dict, name: str, item_type: str) -> list:
 
 def add_item(name: str, item_type: str | None = None, category: str | None = None,
              status: str = "owned", wishlist_rating: int | None = None,
-             tags: list | None = None, linked_items: list | None = None) -> dict:
+             tags: list | None = None, linked_items: list | None = None,
+             owner: str = "") -> dict:
     """Add an item. Returns {"item": {...}} or {"error": ..., "duplicates": [...]}."""
     name = name.strip()
     if not name:
@@ -95,6 +96,7 @@ def add_item(name: str, item_type: str | None = None, category: str | None = Non
     now = _now()
     item = {
         "id": item_id,
+        "owner": (owner or "").strip().lower(),
         "name": name,
         "type": resolved_type,
         "category": resolved_category,
@@ -183,6 +185,12 @@ def search_items(query: str) -> dict:
 
 # --- Flask routes ---
 
+def _item_owner(kwargs) -> str:
+    """Owner handle of the item named in the route. Legacy items with no owner return ''."""
+    item = get_item(kwargs["item_id"]).get("item") or {}
+    return item.get("owner", "")
+
+
 @toolbox_routes.route("/items", methods=["GET"])
 def route_list_items():
     item_type = request.args.get("type")
@@ -211,6 +219,7 @@ def route_add_item():
         wishlist_rating=body.get("wishlist_rating"),
         tags=body.get("tags"),
         linked_items=body.get("linked_items"),
+        owner=g.auth_user,
     )
     if "error" in result:
         code = 409 if result["error"] == "duplicate_detected" else 400
@@ -227,7 +236,7 @@ def route_get_item(item_id):
 
 
 @toolbox_routes.route("/items/<item_id>", methods=["PATCH"])
-@require_auth()
+@require_auth(owner_of=_item_owner)
 def route_update_item(item_id):
     body = request.get_json(silent=True) or {}
     result = update_item(item_id, body)
@@ -239,7 +248,7 @@ def route_update_item(item_id):
 
 
 @toolbox_routes.route("/items/<item_id>", methods=["DELETE"])
-@require_auth()
+@require_auth(owner_of=_item_owner)
 def route_delete_item(item_id):
     result = delete_item(item_id)
     if "error" in result:

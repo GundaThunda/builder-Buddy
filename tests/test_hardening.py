@@ -1,6 +1,4 @@
 """Field guard on step/material updates, collision-safe args, and the plan download rate limit."""
-from collections import deque
-from collections import defaultdict
 
 import pytest
 
@@ -14,7 +12,6 @@ from app_server import app
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(bb, "DATA_FILE", str(tmp_path / "blueprint.json"))
     monkeypatch.setattr(store, "STORE_DIR", str(tmp_path / "plan_store"))
-    monkeypatch.setattr(store, "_download_hits", defaultdict(deque))
     monkeypatch.setattr(safety, "GENERIC_RULES", [])
     yield
 
@@ -60,14 +57,12 @@ def test_material_body_keys_named_like_arguments_do_not_crash(isolated):
 
 # --- download rate limit ---
 
-def test_download_limit_blocks_after_threshold(monkeypatch):
-    monkeypatch.setattr(store, "_download_hits", defaultdict(deque))
+def test_download_limit_blocks_after_threshold(isolated, monkeypatch):
     monkeypatch.setattr(store, "DOWNLOAD_LIMIT", 3)
     assert [store.download_allowed("alice", "plan1", now=0) for _ in range(4)] == [True, True, True, False]
 
 
-def test_download_limit_is_per_user_and_per_plan(monkeypatch):
-    monkeypatch.setattr(store, "_download_hits", defaultdict(deque))
+def test_download_limit_is_per_user_and_per_plan(isolated, monkeypatch):
     monkeypatch.setattr(store, "DOWNLOAD_LIMIT", 1)
     assert store.download_allowed("alice", "plan1", now=0) is True
     assert store.download_allowed("alice", "plan1", now=1) is False
@@ -75,8 +70,7 @@ def test_download_limit_is_per_user_and_per_plan(monkeypatch):
     assert store.download_allowed("alice", "plan2", now=1) is True
 
 
-def test_download_limit_window_resets(monkeypatch):
-    monkeypatch.setattr(store, "_download_hits", defaultdict(deque))
+def test_download_limit_window_resets(isolated, monkeypatch):
     monkeypatch.setattr(store, "DOWNLOAD_LIMIT", 1)
     monkeypatch.setattr(store, "DOWNLOAD_WINDOW_SECONDS", 60)
     assert store.download_allowed("alice", "plan1", now=0) is True

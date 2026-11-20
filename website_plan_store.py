@@ -25,7 +25,6 @@ import json
 import os
 import time
 import uuid
-from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
@@ -260,22 +259,42 @@ def add_branch(author: str, content_id: str, body, acknowledged=()) -> dict:
 
 # Download rate limit: at most DOWNLOAD_LIMIT downloads per user per plan in any
 # DOWNLOAD_WINDOW_SECONDS window. Counts only successful downloads toward x/y.
-# In-memory: resets on restart and is per process. Defaults are a starting point, not a
-# decision; adjust here.
+# Persisted under STORE_DIR so it survives restarts. Defaults are starting values.
 DOWNLOAD_LIMIT = 20
 DOWNLOAD_WINDOW_SECONDS = 3600
-_download_hits: dict = defaultdict(deque)
+
+
+def _limits_path() -> str:
+    return os.path.join(STORE_DIR, "download_limits.json")
+
+
+def _load_limits() -> dict:
+    path = _limits_path()
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_limits(data: dict) -> None:
+    os.makedirs(STORE_DIR, exist_ok=True)
+    with open(_limits_path(), "w") as f:
+        json.dump(data, f)
 
 
 def download_allowed(user: str, content_id: str, now: float | None = None) -> bool:
     """Record an attempt and return True if it is within the limit. Checks before counting."""
-    now = time.monotonic() if now is None else now
-    hits = _download_hits[(user, content_id)]
-    while hits and now - hits[0] >= DOWNLOAD_WINDOW_SECONDS:
-        hits.popleft()
+    now = time.time() if now is None else now
+    data = _load_limits()
+    key = f"{user}|{content_id}"
+    hits = [t for t in data.get(key, []) if now - t < DOWNLOAD_WINDOW_SECONDS]
     if len(hits) >= DOWNLOAD_LIMIT:
+        data[key] = hits
+        _save_limits(data)
         return False
     hits.append(now)
+    data[key] = hits
+    _save_limits(data)
     return True
 
 
