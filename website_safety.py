@@ -34,7 +34,7 @@ POWER_KEYWORDS = ["table saw", "tablesaw", "router", "planer", "jointer", "bands
                   "band saw", "miter saw", "chop saw", "drill", "sander", "lathe",
                   "rip ", "crosscut", "circular saw", "jigsaw"]
 FINISH_KEYWORDS = ["lacquer", "varnish", "polyurethane", "stain", "paint", "solvent",
-                   "epoxy", "spray", "voc"]
+                   "mineral spirits", "epoxy", "spray", "voc"]
 GENERIC_SOURCE = "General shop safety practice. No specific standard cited. Wording pending review."
 
 GENERIC_RULES = [

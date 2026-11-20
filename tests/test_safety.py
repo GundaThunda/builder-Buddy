@@ -236,3 +236,8 @@ def test_material_names_do_not_trigger_generic(generic_on):
     body = {"steps": [{"title": "Assemble", "process_type": "assembly"}],
             "materials": [{"name": "Router bits", "qty": 1, "unit": "pc"}]}
     assert _ids(safety.check_plan(body, [])) == []
+
+
+def test_mineral_spirits_step_gets_respirator_reminder(generic_on):
+    body = _body({"title": "Wipe on mineral spirits to clean the top"})
+    assert "mask_finish_voc" in _ids(safety.check_plan(body, []))
