@@ -2,10 +2,11 @@ import uuid
 import json
 import os
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 import anthropic
 from website_gate import require_auth
 from website_silhouette import generate_presentation
+import website_ron_g_access as access
 
 ron_g_routes = Blueprint("ron_g", __name__)
 
@@ -103,6 +104,8 @@ def get_session_log(limit: int = 20) -> dict:
 @ron_g_routes.route("/ask", methods=["POST"])
 @require_auth()
 def route_ask():
+    if not access.can_ask(g.auth_user):
+        return jsonify({"error": "daily_limit_reached", "limit": access.FREE_DAILY_LIMIT}), 429
     body = request.get_json(silent=True) or {}
     result = ask_ron_g(
         question=body.get("question", ""),
@@ -110,7 +113,19 @@ def route_ask():
     )
     if "error" in result:
         return jsonify(result), 400
+    access.record_ask(g.auth_user)
+    result["remaining_today"] = access.remaining_today(g.auth_user)
     return jsonify(result)
+
+
+@ron_g_routes.route("/subscriptions/<handle>", methods=["POST"])
+@require_auth(admin_only=True)
+def route_set_subscription(handle):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body.get("subscribed"), bool):
+        return jsonify({"error": "subscribed must be true or false"}), 400
+    access.set_subscribed(handle, body["subscribed"])
+    return jsonify({"handle": handle, "subscribed": body["subscribed"]})
 
 
 @ron_g_routes.route("/log", methods=["GET"])
