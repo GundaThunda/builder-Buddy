@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
+from website_gate import require_auth
 
 tips_routes = Blueprint("tips", __name__)
 
@@ -147,6 +148,7 @@ def route_search_tips():
 
 
 @tips_routes.route("/tips", methods=["POST"])
+@require_auth()
 def route_add_tip():
     body = request.get_json(silent=True) or {}
     result = add_tip(
@@ -171,6 +173,7 @@ def route_get_tip(tip_id):
 
 
 @tips_routes.route("/tips/<tip_id>", methods=["PATCH"])
+@require_auth()
 def route_update_tip(tip_id):
     body = request.get_json(silent=True) or {}
     result = update_tip(tip_id, **body)
@@ -182,6 +185,7 @@ def route_update_tip(tip_id):
 
 
 @tips_routes.route("/tips/<tip_id>", methods=["DELETE"])
+@require_auth()
 def route_delete_tip(tip_id):
     result = delete_tip(tip_id)
     if "error" in result:

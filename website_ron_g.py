@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 import anthropic
+from website_gate import require_auth
 from website_silhouette import generate_presentation
 
 ron_g_routes = Blueprint("ron_g", __name__)
@@ -100,6 +101,7 @@ def get_session_log(limit: int = 20) -> dict:
 # --- Flask routes ---
 
 @ron_g_routes.route("/ask", methods=["POST"])
+@require_auth()
 def route_ask():
     body = request.get_json(silent=True) or {}
     result = ask_ron_g(
@@ -112,6 +114,7 @@ def route_ask():
 
 
 @ron_g_routes.route("/log", methods=["GET"])
+@require_auth()
 def route_log():
     limit = int(request.args.get("limit", 20))
     return jsonify(get_session_log(limit))

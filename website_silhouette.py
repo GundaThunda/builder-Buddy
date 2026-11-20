@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 from website_builder_buddy import get_build
+from website_gate import require_auth
 
 silhouette_routes = Blueprint("silhouette", __name__)
 
@@ -214,6 +215,7 @@ def route_list_snapshots():
 
 
 @silhouette_routes.route("/snapshots", methods=["POST"])
+@require_auth()
 def route_create_snapshot():
     body = request.get_json(silent=True) or {}
     build_id = body.get("build_id", "")
@@ -234,6 +236,7 @@ def route_get_snapshot(snap_id):
 
 
 @silhouette_routes.route("/snapshots/<snap_id>", methods=["DELETE"])
+@require_auth()
 def route_delete_snapshot(snap_id):
     result = delete_snapshot(snap_id)
     if "error" in result:
