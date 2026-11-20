@@ -16,10 +16,8 @@ def clean_data():
 
 
 @pytest.fixture
-def client():
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
+def client(admin_client):
+    yield admin_client
 
 
 # --- users / points ---

@@ -5,6 +5,7 @@ from website_silhouette import silhouette_routes
 from website_social_structure import social_routes
 from website_tips import tips_routes
 from website_ron_g import ron_g_routes
+from website_auth import auth_routes
 
 app = Flask(__name__)
 
@@ -14,6 +15,7 @@ app.register_blueprint(silhouette_routes, url_prefix="/silhouette")
 app.register_blueprint(social_routes, url_prefix="/social")
 app.register_blueprint(tips_routes, url_prefix="/tips")
 app.register_blueprint(ron_g_routes, url_prefix="/ron-g")
+app.register_blueprint(auth_routes, url_prefix="/auth")
 
 
 @app.route("/health")
