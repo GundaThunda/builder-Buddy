@@ -32,10 +32,12 @@ def test_cost_outside_5_percent_blocks():
     assert "cost_outside_tolerance" in wm.compare(base, branch, scores, scores, FLOORS)["reasons"]
 
 
-def test_quality_within_5_points_matches_and_beyond_blocks():
+def test_quality_within_5_percent_matches_and_beyond_blocks():
     mats = [_mat("Maple 4/4")]
-    assert wm.compare(mats, mats, {"Maple 4/4": _s(80)}, {"Maple 4/4": _s(85)}, FLOORS)["match"] is True
-    result = wm.compare(mats, mats, {"Maple 4/4": _s(80)}, {"Maple 4/4": _s(86)}, FLOORS)
+    # 80 vs 84: 4/84 = 4.8% apart, inside 5%
+    assert wm.compare(mats, mats, {"Maple 4/4": _s(80)}, {"Maple 4/4": _s(84)}, FLOORS)["match"] is True
+    # 80 vs 85: 5/85 = 5.9% apart, outside 5%
+    result = wm.compare(mats, mats, {"Maple 4/4": _s(80)}, {"Maple 4/4": _s(85)}, FLOORS)
     assert "quality_outside_tolerance:Maple 4/4" in result["reasons"]
 
 
