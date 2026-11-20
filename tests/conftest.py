@@ -19,6 +19,14 @@ def clean_auth_data():
         os.remove(auth.AUTH_DATA_FILE)
 
 
+@pytest.fixture(autouse=True)
+def isolate_ron_g_access(tmp_path, monkeypatch):
+    """Keep Ron G daily counters out of the repo file so tests cannot share allowance."""
+    import website_ron_g_access as access
+    monkeypatch.setattr(access, "ACCESS_FILE", str(tmp_path / "ron_g_access.json"))
+    yield
+
+
 @pytest.fixture
 def admin_client():
     """Test client authenticated as an admin on every request."""

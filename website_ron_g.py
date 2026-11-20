@@ -7,6 +7,7 @@ import anthropic
 from website_gate import require_auth
 from website_silhouette import generate_presentation
 import website_ron_g_access as access
+import website_billing as billing
 
 ron_g_routes = Blueprint("ron_g", __name__)
 
@@ -115,6 +116,27 @@ def route_ask():
         return jsonify(result), 400
     access.record_ask(g.auth_user)
     result["remaining_today"] = access.remaining_today(g.auth_user)
+    return jsonify(result)
+
+
+@ron_g_routes.route("/billing/checkout", methods=["POST"])
+@require_auth()
+def route_billing_checkout():
+    try:
+        return jsonify({"url": billing.create_checkout_url(g.auth_user)})
+    except billing.BillingNotConfigured as e:
+        return jsonify({"error": "billing_not_configured", "missing": str(e)}), 503
+
+
+@ron_g_routes.route("/billing/webhook", methods=["POST"])
+def route_billing_webhook():
+    # No login: Stripe calls this. The signature check is the authentication.
+    try:
+        result = billing.handle_webhook(request.get_data(), request.headers.get("Stripe-Signature", ""))
+    except billing.BillingNotConfigured as e:
+        return jsonify({"error": "billing_not_configured", "missing": str(e)}), 503
+    except Exception:
+        return jsonify({"error": "invalid_signature"}), 400
     return jsonify(result)
 
 
