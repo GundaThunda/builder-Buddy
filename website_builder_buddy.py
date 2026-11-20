@@ -259,7 +259,9 @@ def add_step(build_id: str, title: str, notes: str = "",
     return {"step": step, "build_id": build_id}
 
 
-def update_step(build_id: str, step_id: str, **fields) -> dict:
+def update_step(build_id: str, step_id: str, payload: dict | None = None, **fields) -> dict:
+    # Same collision guard as update_build: a body key named build_id or step_id cannot clash.
+    merged = {**(payload if isinstance(payload, dict) else {}), **fields}
     data = _load()
     build = data["builds"].get(build_id)
     if not build:
@@ -272,9 +274,10 @@ def update_step(build_id: str, step_id: str, **fields) -> dict:
 
     allowed = {"title", "notes", "process_type", "estimated_minutes",
                "alternatives", "step_tool_ids", "step_material_ids", "tip_ids"}
-    for key, value in fields.items():
-        if key not in allowed:
-            continue
+    guard = filter_allowed_fields(merged, allowed)
+    if guard.rejected:
+        log_unknown_fields("PATCH /blueprint/builds/<id>/steps/<id>", build_id, _actor(), guard.rejected)
+    for key, value in guard.applied.items():
         if key == "title":
             value = value.strip()
             if not value:
@@ -383,7 +386,8 @@ def add_material(build_id: str, name: str, qty: float = 1.0,
     return {"material": material, "build_id": build_id}
 
 
-def update_material(build_id: str, material_id: str, **fields) -> dict:
+def update_material(build_id: str, material_id: str, payload: dict | None = None, **fields) -> dict:
+    merged = {**(payload if isinstance(payload, dict) else {}), **fields}
     data = _load()
     build = data["builds"].get(build_id)
     if not build:
@@ -396,9 +400,10 @@ def update_material(build_id: str, material_id: str, **fields) -> dict:
 
     allowed = {"name", "species_or_grade", "qty", "unit", "dimensions",
                "cost_per_unit", "vendor", "sourced", "notes"}
-    for key, value in fields.items():
-        if key not in allowed:
-            continue
+    guard = filter_allowed_fields(merged, allowed)
+    if guard.rejected:
+        log_unknown_fields("PATCH /blueprint/builds/<id>/materials/<id>", build_id, _actor(), guard.rejected)
+    for key, value in guard.applied.items():
         if key == "qty" and value <= 0:
             return {"error": "qty must be greater than 0"}
         if key == "cost_per_unit" and value < 0:
@@ -586,7 +591,7 @@ def route_add_step(build_id):
 @require_auth()
 def route_update_step(build_id, step_id):
     body = request.get_json(silent=True) or {}
-    result = update_step(build_id, step_id, **body)
+    result = update_step(build_id, step_id, body)
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)
@@ -646,7 +651,7 @@ def route_add_material(build_id):
 @require_auth()
 def route_update_material(build_id, material_id):
     body = request.get_json(silent=True) or {}
-    result = update_material(build_id, material_id, **body)
+    result = update_material(build_id, material_id, body)
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)
