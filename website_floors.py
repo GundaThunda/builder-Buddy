@@ -20,8 +20,13 @@ FLOORS = {
     "plywood_exterior": (60, "APA EW grade glossary: Exterior bond, C minimum"),
     "plywood_interior": (60, "APA EW grade glossary: Exposure 1 bond, C minimum"),
 
-    # Softwood framing. No verified grade source yet. Low confidence.
-    "softwood_framing": (60, "UNSOURCED. Placeholder pending a verified grade standard"),
+    # Softwood framing. Grades per CWC (Select Structural, No.1-No.3, Stud, Construction, Standard).
+    # Structural: No.2 and better for joists, rafters, trusses, lintels. Southern Pine No.2
+    # 2x4 design value Fb 1100 psi (SPIB design value tables).
+    "softwood_structural": (60, "CWC grades: No.2 and better; SPIB Southern Pine No.2 Fb 1100 psi"),
+    # Non-structural framing: plates, sills, blocking (CWC: "where high strength values are not required").
+    "softwood_nonstructural": (50, "CWC Construction/Standard grades: plates, sills, blocking"),
+    # Economy studs are not stress graded (CWC): deliberately no floor, fails closed.
 
     # Structural steel. Yield and tensile values from AISC (Fy/Fu in ksi).
     "steel_a992_a572_gr50": (70, "AISC: Fy 50 ksi, Fu 65 ksi"),

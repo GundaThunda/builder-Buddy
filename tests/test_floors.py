@@ -14,6 +14,13 @@ def test_floors_by_type_matches_table():
     assert set(mapping) == set(wf.FLOORS)
 
 
+def test_softwood_split_has_floors_and_economy_stud_fails_closed():
+    assert wf.floors_by_type()["softwood_structural"] == 60
+    assert wf.floors_by_type()["softwood_nonstructural"] == 50
+    assert "softwood_framing" not in wf.floors_by_type()
+    assert "softwood_economy_stud" not in wf.floors_by_type()
+
+
 def test_epoxy_has_no_floor_and_fails_closed():
     mats = [{"name": "Epoxy", "qty": 1, "cost_per_unit": 10.0}]
     scores = {"Epoxy": {"score": 90, "type": "epoxy"}}
